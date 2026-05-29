@@ -1,0 +1,6 @@
+code/build/
+code/_build_skip/
+*.o
+*.a
+.vscode/
+.idea/
