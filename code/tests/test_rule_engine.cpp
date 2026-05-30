@@ -1,6 +1,11 @@
 /**
  * @file test_rule_engine.cpp
  * @brief Unit tests for aipr::rule::RuleEngine.
+ *
+ * Updated for Issue #1 architecture:
+ * - RuleHit fields: rule_id / severity / file / line / message / suggestion
+ * - Engine::run(ParsedDiff, AstSummary*) interface
+ * - Engine::scan() legacy interface still works
  */
 #include "rules/engine.h"
 
@@ -8,10 +13,39 @@
 #include <set>
 
 using aipr::rule::FileDiff;
+using aipr::rule::ParsedDiff;
 using aipr::rule::RuleEngine;
 using aipr::rule::RuleHit;
+using aipr::rule::Severity;
 
-// ---- 规则 1：unpaired_alloc ----
+// ---- Helper: build a ParsedDiff from a single FileDiff ----
+static ParsedDiff make_pd(const FileDiff& fd) {
+    ParsedDiff pd;
+    pd.files.push_back(fd);
+    return pd;
+}
+
+// ---- Severity mapping tests ----
+
+TEST(RuleEngine, SeverityMappingInfo) {
+    RuleHit h;
+    h.severity = Severity::Info;
+    EXPECT_STREQ(aipr::rule::severity_str(h.severity), "info");
+}
+
+TEST(RuleEngine, SeverityMappingWarn) {
+    RuleHit h;
+    h.severity = Severity::Warn;
+    EXPECT_STREQ(aipr::rule::severity_str(h.severity), "warn");
+}
+
+TEST(RuleEngine, SeverityMappingError) {
+    RuleHit h;
+    h.severity = Severity::Error;
+    EXPECT_STREQ(aipr::rule::severity_str(h.severity), "error");
+}
+
+// ---- Rule 1: unpaired_alloc ----
 
 TEST(RuleEngine, DetectsMallocWithoutFree) {
     FileDiff diff;
@@ -20,11 +54,16 @@ TEST(RuleEngine, DetectsMallocWithoutFree) {
     diff.added_line_nums = {10};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "unpaired_alloc") { found = true; break; }
+        if (h.rule_id == "unpaired_alloc") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Error);
+            EXPECT_FALSE(h.suggestion.empty());
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
@@ -36,11 +75,15 @@ TEST(RuleEngine, DetectsNewWithoutDelete) {
     diff.added_line_nums = {42};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "unpaired_alloc") { found = true; break; }
+        if (h.rule_id == "unpaired_alloc") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Error);
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
@@ -55,14 +98,14 @@ TEST(RuleEngine, NoHitWhenMallocAndFreePaired) {
     diff.added_line_nums = {5, 6};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     for (const auto& h : hits) {
-        EXPECT_NE(h.rule_name, "unpaired_alloc");
+        EXPECT_NE(h.rule_id, "unpaired_alloc");
     }
 }
 
-// ---- 规则 2：virtual_modify ----
+// ---- Rule 2: virtual_modify ----
 
 TEST(RuleEngine, DetectsOverrideModification) {
     FileDiff diff;
@@ -71,16 +114,20 @@ TEST(RuleEngine, DetectsOverrideModification) {
     diff.removed_line_nums = {20};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "virtual_modify") { found = true; break; }
+        if (h.rule_id == "virtual_modify") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Error);
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
 
-// ---- 规则 3：format_only ----
+// ---- Rule 3: format_only ----
 
 TEST(RuleEngine, DetectsFormatOnlyChange) {
     FileDiff diff;
@@ -91,11 +138,15 @@ TEST(RuleEngine, DetectsFormatOnlyChange) {
     diff.removed_line_nums = {1};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "format_only") { found = true; break; }
+        if (h.rule_id == "format_only") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Info);
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
@@ -107,14 +158,14 @@ TEST(RuleEngine, NoFormatOnlyForCodeChange) {
     diff.added_line_nums = {5};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     for (const auto& h : hits) {
-        EXPECT_NE(h.rule_name, "format_only");
+        EXPECT_NE(h.rule_id, "format_only");
     }
 }
 
-// ---- 规则 4：test_file ----
+// ---- Rule 4: test_file ----
 
 TEST(RuleEngine, DetectsTestFile) {
     FileDiff diff;
@@ -123,16 +174,20 @@ TEST(RuleEngine, DetectsTestFile) {
     diff.added_line_nums = {10};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "test_file") { found = true; break; }
+        if (h.rule_id == "test_file") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Info);
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
 
-// ---- 规则 5：todo_fixme ----
+// ---- Rule 5: todo_fixme ----
 
 TEST(RuleEngine, DetectsTODO) {
     FileDiff diff;
@@ -141,11 +196,15 @@ TEST(RuleEngine, DetectsTODO) {
     diff.added_line_nums = {15};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "todo_fixme") { found = true; break; }
+        if (h.rule_id == "todo_fixme") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Warn);
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
@@ -157,16 +216,19 @@ TEST(RuleEngine, DetectsFIXME) {
     diff.added_line_nums = {30};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "todo_fixme") { found = true; break; }
+        if (h.rule_id == "todo_fixme") {
+            found = true;
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
 
-// ---- 规则 6：raw_ptr_new ----
+// ---- Rule 6: raw_ptr_new ----
 
 TEST(RuleEngine, DetectsRawPointerNew) {
     FileDiff diff;
@@ -175,11 +237,15 @@ TEST(RuleEngine, DetectsRawPointerNew) {
     diff.added_line_nums = {8};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "raw_ptr_new") { found = true; break; }
+        if (h.rule_id == "raw_ptr_new") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Warn);
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
@@ -191,14 +257,14 @@ TEST(RuleEngine, NoHitForMakeUnique) {
     diff.added_line_nums = {8};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     for (const auto& h : hits) {
-        EXPECT_NE(h.rule_name, "raw_ptr_new");
+        EXPECT_NE(h.rule_id, "raw_ptr_new");
     }
 }
 
-// ---- 规则 7：c_style_cast ----
+// ---- Rule 7: c_style_cast ----
 
 TEST(RuleEngine, DetectsCStyleCast) {
     FileDiff diff;
@@ -207,16 +273,20 @@ TEST(RuleEngine, DetectsCStyleCast) {
     diff.added_line_nums = {12};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "c_style_cast") { found = true; break; }
+        if (h.rule_id == "c_style_cast") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Info);
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
 
-// ---- 规则 8：memcpy_size ----
+// ---- Rule 8: memcpy_size ----
 
 TEST(RuleEngine, DetectsMemcpyWithPointerSizeof) {
     FileDiff diff;
@@ -225,16 +295,20 @@ TEST(RuleEngine, DetectsMemcpyWithPointerSizeof) {
     diff.added_line_nums = {25};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     bool found = false;
     for (const auto& h : hits) {
-        if (h.rule_name == "memcpy_size") { found = true; break; }
+        if (h.rule_id == "memcpy_size") {
+            found = true;
+            EXPECT_EQ(h.severity, Severity::Error);
+            break;
+        }
     }
     EXPECT_TRUE(found);
 }
 
-// ---- 多规则组合测试 ----
+// ---- Multi-rule combination test ----
 
 TEST(RuleEngine, MultipleRulesCanFireOnSameDiff) {
     FileDiff diff;
@@ -246,24 +320,61 @@ TEST(RuleEngine, MultipleRulesCanFireOnSameDiff) {
     diff.added_line_nums = {5, 6};
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
 
     EXPECT_GE(hits.size(), 3u);
 
     std::set<std::string> rules;
     for (const auto& h : hits) {
-        rules.insert(h.rule_name);
+        rules.insert(h.rule_id);
     }
     EXPECT_TRUE(rules.count("test_file"));
     EXPECT_TRUE(rules.count("todo_fixme"));
     EXPECT_TRUE(rules.count("raw_ptr_new") || rules.count("unpaired_alloc"));
 }
 
-// ---- 空输入测试 ----
+// ---- Engine::run vs scan equivalence ----
+
+TEST(RuleEngine, RunAndScanProduceSameResults) {
+    FileDiff diff;
+    diff.filename = "src/mixed.cpp";
+    diff.added_lines = {"auto* p = new int(42);"};
+    diff.added_line_nums = {10};
+
+    RuleEngine engine;
+    auto run_hits  = engine.run(make_pd(diff));
+    auto scan_hits = engine.scan({diff});
+
+    ASSERT_EQ(run_hits.size(), scan_hits.size());
+    for (size_t i = 0; i < run_hits.size(); ++i) {
+        EXPECT_EQ(run_hits[i].rule_id, scan_hits[i].rule_id);
+        EXPECT_EQ(run_hits[i].severity, scan_hits[i].severity);
+        EXPECT_EQ(run_hits[i].file, scan_hits[i].file);
+        EXPECT_EQ(run_hits[i].line, scan_hits[i].line);
+    }
+}
+
+// ---- Engine::run with nullptr AST (no crash) ----
+
+TEST(RuleEngine, RunWithNullAstDoesNotCrash) {
+    FileDiff diff;
+    diff.filename = "src/main.cpp";
+    diff.added_lines = {"void* buf = malloc(1024);"};
+    diff.added_line_nums = {5};
+
+    RuleEngine engine;
+    ParsedDiff pd;
+    pd.files.push_back(diff);
+
+    EXPECT_NO_THROW(engine.run(pd, nullptr));
+}
+
+// ---- Empty input tests ----
 
 TEST(RuleEngine, EmptyInputReturnsNoHits) {
     RuleEngine engine;
-    auto hits = engine.scan({});
+    ParsedDiff pd;
+    auto hits = engine.run(pd);
     EXPECT_TRUE(hits.empty());
 }
 
@@ -272,6 +383,29 @@ TEST(RuleEngine, EmptyDiffReturnsNoHits) {
     diff.filename = "src/empty.cpp";
 
     RuleEngine engine;
-    auto hits = engine.scan({diff});
+    auto hits = engine.run(make_pd(diff));
     EXPECT_TRUE(hits.empty());
+}
+
+// ---- RuleHit field completeness test ----
+
+TEST(RuleEngine, RuleHitFieldsArePopulated) {
+    FileDiff diff;
+    diff.filename = "src/leak.cpp";
+    diff.added_lines = {"void* buf = malloc(1024);"};
+    diff.added_line_nums = {7};
+
+    RuleEngine engine;
+    auto hits = engine.run(make_pd(diff));
+
+    ASSERT_FALSE(hits.empty());
+    const auto& h = hits[0];
+    EXPECT_FALSE(h.rule_id.empty());
+    EXPECT_FALSE(h.file.empty());
+    EXPECT_GT(h.line, 0);
+    EXPECT_FALSE(h.message.empty());
+    // suggestion may be empty for some rules, but unpaired_alloc has one
+    if (h.rule_id == "unpaired_alloc") {
+        EXPECT_FALSE(h.suggestion.empty());
+    }
 }
