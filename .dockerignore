@@ -1,0 +1,34 @@
+# Build artefacts — never copy into the image.
+build/
+out/
+dist/
+*.o
+*.so
+*.a
+*.exe
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Git
+.git/
+.github/
+
+# Docs and demo material are not needed at runtime
+demo/
+eval/runs/
+
+# Local secrets (never accidentally copy these in)
+.env
+.env.*
+*.key
+*.pem
