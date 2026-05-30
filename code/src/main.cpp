@@ -7,6 +7,7 @@
  * DeepSeek chat -> write Markdown report.
  *
  * Day-2: added --persona flag for multi-persona reviewing.
+ * Day-2: added --consensus N flag for multi-vote consensus.
  */
 
 #include "analyzer/ast_analyzer.h"
@@ -14,22 +15,26 @@
 #include "gateway/llm_gateway.h"
 #include "github/api_client.h"
 #include "prompt/personas.h"
+#include "prompt/consensus.h"
 
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace {
 
-constexpr std::size_t kMaxFilesInPrompt = 30;
+constexpr std::size_t kMaxFilesInPrompt     = 30;
 constexpr std::size_t kMaxPatchLinesPerFile = 200;
 constexpr std::size_t kMaxBodyCharsInPrompt = 2000;
 
@@ -62,6 +67,7 @@ std::string build_system_prompt(const std::string& persona) {
 std::string build_user_prompt(
     const aipr::github::PullRequest& pr,
     const std::vector<aipr::analyzer::AstSummary>& ast_summaries = {}) {
+
     std::ostringstream oss;
     oss << "# PR 元信息\n"
         << "- 仓库：" << pr.locator.owner << "/" << pr.locator.repo << "\n"
@@ -83,7 +89,7 @@ std::string build_user_prompt(
         << kMaxFilesInPrompt << " 个，每个 patch 最多 "
         << kMaxPatchLinesPerFile << " 行）\n\n";
 
-    const std::size_t limit = std::min<std::size_t>(pr.files.size(), kMaxFilesInPrompt);
+    const std::size_t limit = std::min(pr.files.size(), kMaxFilesInPrompt);
     for (std::size_t i = 0; i < limit; ++i) {
         const auto& f = pr.files[i];
         oss << "## " << (i + 1) << ". `" << f.filename << "` ["
@@ -92,7 +98,9 @@ std::string build_user_prompt(
             oss << "_(二进制文件或纯重命名，无 patch)_\n\n";
             continue;
         }
-        oss << "```diff\n" << truncate_patch(f.patch, kMaxPatchLinesPerFile) << "```\n\n";
+        oss << "```diff\n"
+            << truncate_patch(f.patch, kMaxPatchLinesPerFile)
+            << "```\n\n";
     }
 
     if (pr.files.size() > kMaxFilesInPrompt) {
@@ -103,8 +111,7 @@ std::string build_user_prompt(
     // --- AST analysis section (optional, appears when --source-dir is used) ---
     if (!ast_summaries.empty()) {
         std::size_t shown = 0;
-        for (const auto& s : ast_summaries)
-            if (s.ok) ++shown;
+        for (const auto& s : ast_summaries) if (s.ok) ++shown;
         if (shown > 0) {
             oss << "\n# AST 分析（基于 libclang，含 " << shown << " 个文件）\n\n";
             for (const auto& s : ast_summaries) {
@@ -113,6 +120,7 @@ std::string build_user_prompt(
             }
         }
     }
+
     return oss.str();
 }
 
@@ -126,6 +134,7 @@ std::string now_iso() {
 }
 
 std::string render_report(const aipr::github::PullRequest& pr,
+                          int consensus_n,
                           const aipr::gateway::LLMResponse& llm,
                           const std::string& model,
                           std::chrono::milliseconds elapsed,
@@ -133,7 +142,13 @@ std::string render_report(const aipr::github::PullRequest& pr,
     std::ostringstream oss;
     oss << "# AI PR Review 报告\n\n"
         << "> 由 `ai-pr-review` 自动生成。仅供辅助参考，最终判断以 reviewer 为准。\n"
-        << "> " << aipr::prompt::persona_badge(persona) << "\n\n"
+        << "> " << aipr::prompt::persona_badge(persona) << "\n";
+    if (consensus_n > 1) {
+        oss << "> 🗳️ Consensus 模式 — " << consensus_n
+            << " 次独立审查后按多数票合成，保留阈值 ⌈N/2⌉="
+            << ((consensus_n + 1) / 2) << "\n";
+    }
+    oss << "\n"
         << "| 项 | 值 |\n"
         << "| --- | --- |\n"
         << "| PR | [" << pr.locator.owner << "/" << pr.locator.repo
@@ -143,6 +158,10 @@ std::string render_report(const aipr::github::PullRequest& pr,
         << "| Persona | " << aipr::prompt::persona_badge(persona) << " |\n"
         << "| 文件数 | " << pr.files.size() << " |\n"
         << "| 模型 | " << model << " |\n"
+        << "| Consensus | " << (consensus_n > 1
+                                ? ("✅ N=" + std::to_string(consensus_n)
+                                   + "（阈值 " + std::to_string((consensus_n + 1) / 2) + "）")
+                                : std::string("未启用")) << " |\n"
         << "| LLM 调用次数 | " << llm.attempts << " |\n"
         << "| 用时 | " << elapsed.count() << " ms |\n"
         << "| 生成时间 | " << now_iso() << " |\n\n"
@@ -167,31 +186,48 @@ int main(int argc, char** argv) {
     std::string pr_url;
     std::string github_token;
     std::string llm_key;
-    std::string output_path = "review.md";
-    std::string model = "deepseek-chat";
-    std::string llm_host = "api.deepseek.com";
-    std::string llm_path = "/v1/chat/completions";
-    std::string user_agent = "ai-pr-review/0.2";
+    std::string output_path  = "review.md";
+    std::string model        = "deepseek-chat";
+    std::string llm_host     = "api.deepseek.com";
+    std::string llm_path     = "/v1/chat/completions";
+    std::string user_agent   = "ai-pr-review/0.2";
     std::string source_dir;
-    std::string persona = "default";
-    int timeout_s = 60;
-    int retries = 3;
-    bool verbose = false;
+    std::string persona      = "default";
+    int timeout_s   = 60;
+    int retries     = 3;
+    bool verbose    = false;
+    int consensus_n = 1;
 
-    app.add_option("--pr", pr_url, "GitHub PR URL, e.g. https://github.com/owner/repo/pull/123")
+    app.add_option("--pr", pr_url,
+        "GitHub PR URL, e.g. https://github.com/owner/repo/pull/123")
         ->required();
-    app.add_option("--github-token", github_token, "GitHub PAT (fallback: env GITHUB_TOKEN; empty = anonymous)");
-    app.add_option("--llm-key", llm_key, "DeepSeek API key (fallback: env DEEPSEEK_API_KEY)");
-    app.add_option("--output,-o", output_path, "Path of the Markdown report (default: review.md)");
-    app.add_option("--model", model, "LLM model (default: deepseek-chat)");
-    app.add_option("--llm-host", llm_host, "LLM host (default: api.deepseek.com)");
-    app.add_option("--llm-path", llm_path, "LLM endpoint path (default: /v1/chat/completions)");
-    app.add_option("--user-agent", user_agent, "User-Agent for GitHub requests (GitHub requires this)");
-    app.add_option("--timeout", timeout_s, "Per-attempt timeout in seconds");
-    app.add_option("--retries", retries, "Max retries on LLM transport errors");
-    app.add_option("--source-dir", source_dir, "Local repo root for libclang AST analysis (optional, enables AST context)");
-    app.add_option("--persona", persona, "Reviewer persona: default | linus | mentor | devil | zen");
-    app.add_flag("-v,--verbose", verbose, "Enable debug logs");
+    app.add_option("--github-token", github_token,
+        "GitHub PAT (fallback: env GITHUB_TOKEN; empty = anonymous)");
+    app.add_option("--llm-key", llm_key,
+        "DeepSeek API key (fallback: env DEEPSEEK_API_KEY)");
+    app.add_option("--output,-o", output_path,
+        "Path of the Markdown report (default: review.md)");
+    app.add_option("--model", model,
+        "LLM model (default: deepseek-chat)");
+    app.add_option("--llm-host", llm_host,
+        "LLM host (default: api.deepseek.com)");
+    app.add_option("--llm-path", llm_path,
+        "LLM endpoint path (default: /v1/chat/completions)");
+    app.add_option("--user-agent", user_agent,
+        "User-Agent for GitHub requests (GitHub requires this)");
+    app.add_option("--timeout", timeout_s,
+        "Per-attempt timeout in seconds");
+    app.add_option("--retries", retries,
+        "Max retries on LLM transport errors");
+    app.add_option("--source-dir", source_dir,
+        "Local repo root for libclang AST analysis (optional, enables AST context)");
+    app.add_option("--persona", persona,
+        "Reviewer persona: default | linus | mentor | devil | zen");
+    app.add_option("--consensus", consensus_n,
+        "Run N independent reviews (N in [1,5]) and consolidate by majority vote (default 1)")
+        ->check(CLI::Range(1, 5));
+    app.add_flag("-v,--verbose", verbose,
+        "Enable debug logs");
 
     CLI11_PARSE(app, argc, argv);
 
@@ -199,7 +235,7 @@ int main(int argc, char** argv) {
     spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
 
     if (github_token.empty()) github_token = env_or_empty("GITHUB_TOKEN");
-    if (llm_key.empty()) llm_key = env_or_empty("DEEPSEEK_API_KEY");
+    if (llm_key.empty())      llm_key      = env_or_empty("DEEPSEEK_API_KEY");
     if (llm_key.empty()) {
         spdlog::error("LLM key missing: pass --llm-key or set DEEPSEEK_API_KEY");
         return 2;
@@ -229,7 +265,9 @@ int main(int argc, char** argv) {
         spdlog::error("Failed to fetch PR -- see previous logs.");
         return 3;
     }
-    spdlog::info("PR fetched: \"{}\" by {} | {} files", pr->title, pr->author, pr->files.size());
+    spdlog::info("PR fetched: \"{}\" by {} | {} files",
+                 pr->title, pr->author, pr->files.size());
+
     if (pr->files.empty()) {
         spdlog::warn("PR has zero changed files -- nothing to review.");
         return 0;
@@ -243,8 +281,8 @@ int main(int argc, char** argv) {
         namespace fs = std::filesystem;
         for (const auto& f : pr->files) {
             auto ext = fs::path(f.filename).extension().string();
-            if (ext != ".cpp" && ext != ".cc" && ext != ".cxx" &&
-                ext != ".h" && ext != ".hpp" && ext != ".hxx")
+            if (ext != ".cpp" && ext != ".cc"  && ext != ".cxx" &&
+                ext != ".h"   && ext != ".hpp" && ext != ".hxx")
                 continue;
             fs::path p = fs::path(source_dir) / f.filename;
             if (!fs::exists(p)) {
@@ -261,36 +299,87 @@ int main(int argc, char** argv) {
     }
 
     const std::string system_prompt = build_system_prompt(persona);
-    const std::string user_prompt = build_user_prompt(*pr, ast_summaries);
+    const std::string user_prompt   = build_user_prompt(*pr, ast_summaries);
     spdlog::debug("System prompt: {} chars", system_prompt.size());
     spdlog::debug("User prompt: {} chars", user_prompt.size());
     spdlog::info("Persona: {}", persona);
 
     aipr::gateway::LLMConfig cfg;
-    cfg.host = llm_host;
-    cfg.path = llm_path;
-    cfg.model = model;
-    cfg.api_key = llm_key;
+    cfg.host            = llm_host;
+    cfg.path            = llm_path;
+    cfg.model           = model;
+    cfg.api_key         = llm_key;
     cfg.timeout_seconds = timeout_s;
-    cfg.max_retries = retries;
-    cfg.temperature = 0.2;
+    cfg.max_retries     = retries;
+    cfg.temperature     = 0.2;
+
+    // --- Stage 1: run N independent reviews (N=1 keeps default behaviour) ---
+    // Raise temperature when N>1 so the N runs actually differ enough for voting.
+    if (consensus_n > 1) cfg.temperature = 0.7;
 
     aipr::gateway::LLMGateway gw(cfg);
-    spdlog::info("Calling {} on {}{} ...", model, llm_host, llm_path);
+    spdlog::info("Calling {} on {}{} (persona={}, consensus N={}) ...",
+                 model, llm_host, llm_path, persona, consensus_n);
 
     const auto t0 = std::chrono::steady_clock::now();
-    auto resp = gw.chat(system_prompt, user_prompt);
-    const auto t1 = std::chrono::steady_clock::now();
-    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
-
-    if (resp.ok) {
-        spdlog::info("LLM ok in {} ms after {} attempt(s), {} chars",
-                     elapsed.count(), resp.attempts, resp.content.size());
-    } else {
-        spdlog::error("LLM failed after {} attempt(s): {}", resp.attempts, resp.error);
+    aipr::gateway::LLMResponse resp;
+    std::vector<std::string> stage1_reports;
+    stage1_reports.reserve(consensus_n);
+    int total_attempts = 0;
+    for (int i = 1; i <= consensus_n; ++i) {
+        spdlog::info("  consensus run {}/{} ...", i, consensus_n);
+        auto r = gw.chat(system_prompt, user_prompt);
+        total_attempts += r.attempts;
+        if (!r.ok) {
+            spdlog::error("LLM run {}/{} failed after {} attempt(s): {}",
+                          i, consensus_n, r.attempts, r.error);
+            resp = std::move(r);
+            stage1_reports.clear();
+            break;
+        }
+        spdlog::info("  run {}/{} ok, {} chars", i, consensus_n, r.content.size());
+        stage1_reports.push_back(r.content);
+        resp = std::move(r);
     }
 
-    const std::string report = render_report(*pr, resp, model, elapsed, persona);
+    // --- Consensus stage: meta-review when we have N>=2 successful runs ---
+    if (consensus_n > 1 && !stage1_reports.empty()
+            && (int)stage1_reports.size() == consensus_n) {
+        spdlog::info("Consensus: consolidating {} runs by majority vote ...",
+                     consensus_n);
+        aipr::gateway::LLMConfig cfg2 = cfg;
+        cfg2.temperature = 0.2; // meta-review should be deterministic
+        aipr::gateway::LLMGateway gw2(cfg2);
+        const std::string consensus_sys  =
+            aipr::prompt::consensus_system_prompt(consensus_n);
+        const std::string consensus_user =
+            aipr::prompt::build_consensus_user_prompt(stage1_reports, user_prompt);
+        auto resp2 = gw2.chat(consensus_sys, consensus_user);
+        total_attempts += resp2.attempts;
+        if (resp2.ok) {
+            spdlog::info("Consensus stage ok after {} attempt(s), {} chars",
+                         resp2.attempts, resp2.content.size());
+            resp = std::move(resp2);
+        } else {
+            spdlog::warn("Consensus stage failed: {} -- keeping last run as fallback",
+                         resp2.error);
+        }
+    }
+    resp.attempts = total_attempts;
+
+    const auto t1 = std::chrono::steady_clock::now();
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
+
+    if (resp.ok) {
+        spdlog::info("Final review ready in {} ms, total {} attempt(s), {} chars",
+                     elapsed.count(), resp.attempts, resp.content.size());
+    } else {
+        spdlog::error("LLM failed after {} attempt(s): {}",
+                      resp.attempts, resp.error);
+    }
+
+    const std::string report = render_report(*pr, consensus_n, resp, model, elapsed, persona);
 
     try {
         std::filesystem::path out(output_path);
