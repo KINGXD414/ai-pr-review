@@ -100,9 +100,9 @@ GitHub PR
 
 **评分公式**：`score = keyword_hit × 0.4 + severity_match × 0.3 + (1 - hallucination_rate) × 0.3`
 
-**评测集**：5 条真实 merged PR（2 高 2 中 1 低），来自 nlohmann/json、spdlog、muduo 三个开源项目，位于 `eval/cases.json`。
+**评测集**：5 条真实 merged PR（2 高 2 中 1 低），来自 nlohmann/json、spdlog、muduo 三个开源项目，位于 `code/eval/cases.json`；候选 PR 的人工标注详见 `eval/dataset_v2.md`。
 
-**Baseline 数据**：v0.1.0 vs v0.2.0 三招对比报告见 `docs/eval-comparison.md`（基于完整 5 cases × 4 configs 矩阵）。
+**Baseline 实测**：v0.1.0 单审基线已跑通，2/5 cases 综合分 **85%**（muduo-505 100% + muduo-729 70%），完整报告 `code/eval/baseline_report.md`。v0.1.0 vs v0.2.0 三招对比矩阵（5 cases × 4 configs）将在 Day-3 完成，对比报告见 `code/eval/comparison_report.md`。
 
 ## 差异化特性 v0.2.0（三招）
 
@@ -145,7 +145,7 @@ GitHub PR
 ./ai-pr-review --repo owner/repo --pr 123 --consensus 3
 ```
 
-> 三招互斥使用，详细对比数据见 `docs/eval-comparison.md`（待 baseline 跑完后填入）。
+> 三招互斥使用。v0.1.0 baseline 实测综合分 85%（见 `code/eval/baseline_report.md`），三招对比矩阵将在 Day-3 完成并写入 `code/eval/comparison_report.md`。
 
 ## 构建与运行
 
@@ -242,14 +242,14 @@ export DEEPSEEK_API_KEY=your_api_key
 cd code/build
 
 # 全量评测（baseline，无 flag）
-./ai-pr-eval --cases ../../eval/cases.json --binary ./ai-pr-review \
+./ai-pr-eval --cases ../eval/cases.json --binary ./ai-pr-review \
              --github-token $GITHUB_TOKEN --llm-key $DEEPSEEK_API_KEY \
-             --out-dir ../../eval/runs/baseline
+             --out-dir ../eval/runs/baseline
 
 # 三招对比评测（任一）
-./ai-pr-eval --cases ../../eval/cases.json --binary ./ai-pr-review \
+./ai-pr-eval --cases ../eval/cases.json --binary ./ai-pr-review \
              --persona linus       # 或 --self-critique / --consensus 3
-             --out-dir ../../eval/runs/persona-linus
+             --out-dir ../eval/runs/persona-linus
 ```
 
 输出：每条 case 的三维度得分 + 总评分 + JSON 详情。
@@ -277,7 +277,12 @@ ai-pr-review/
 │   │   │   ├── personas.h      # 5 种 reviewer 人设
 │   │   │   ├── self_critique.h # 二审反思 prompt
 │   │   │   └── consensus.h     # 多次投票 meta-review prompt
-│   │   └── eval/               # 评测框架核心代码
+│   │   └── eval/               # 评测程序核心代码（runner.cpp / runner.h）
+│   ├── eval/                   # 评测数据与实测产出
+│   │   ├── cases.json          # 评测集（5 条标注 PR，dataset_v2 子集）
+│   │   ├── baseline_report.md  # v0.1.0 baseline 实测报告（综合 85%）
+│   │   ├── comparison_report.md # v0.1.0 vs v0.2.0 三招对比（Day-3 产出）
+│   │   └── runs/               # 各次评测原始输出（runs/<时间戳>/）
 │   └── tests/                  # GTest 单元测试
 │       ├── test_rule_engine.cpp
 │       ├── test_ast_analyzer.cpp
@@ -288,14 +293,12 @@ ai-pr-review/
 │   ├── adr/                    # 架构决策记录
 │   │   ├── 001-differentiation-strategy.md  # 三招方向选择
 │   │   └── 002-evaluation-framework.md      # 评测体系设计
-│   ├── kodo-prestudy.md        # 七牛云 KODO 集成预研（未来扩展）
-│   └── eval-comparison.md      # v0.1.0 vs v0.2.0 评测对比报告
+│   └── kodo-prestudy.md        # 七牛云 KODO 集成预研（未来扩展）
 ├── demo/                       # 真实开源 PR demo 输出
 │   ├── muduo_pr705_review.md
 │   └── muduo_pr729_review.md
 ├── eval/
-│   ├── cases.json              # 评测集（5 条标注 PR）
-│   └── dataset_v2.md           # 评测集说明文档
+│   └── dataset_v2.md           # 评测集人工标注说明（9 条候选 PR）
 └── README.md                   # 本文件
 ```
 
