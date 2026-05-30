@@ -1,12 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(ai-pr-review
-    VERSION 0.1.0
-    DESCRIPTION "AI-powered Pull Request review assistant (Day 1 skeleton)"
+    VERSION 0.2.0
+    DESCRIPTION "AI-powered Pull Request review assistant (Day 2 — rule engine added)"
     LANGUAGES CXX)
 
-# ---------------------------------------------------------------------------
-# Global compile options
-# ---------------------------------------------------------------------------
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -15,38 +12,27 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# Strict warnings — verify the validation requirement (-Wall -Wextra, zero warning).
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-# ---------------------------------------------------------------------------
-# System dependencies (installed through apt)
-# ---------------------------------------------------------------------------
 find_package(OpenSSL REQUIRED)
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
-
-# spdlog ships with apt; some Ubuntu builds need fmt linked explicitly.
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
-# ---------------------------------------------------------------------------
-# Third-party libraries fetched at configure time (no vcpkg, per task spec)
-# ---------------------------------------------------------------------------
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
-# cpp-httplib v0.15.3 — header-only HTTP client/server with SSL & SSE support.
 FetchContent_Declare(
     httplib
     GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG        v0.14.3
+    GIT_TAG        v0.14.1
     GIT_SHALLOW    TRUE
 )
 
-# CLI11 v2.4.1 — header-only command-line parser.
 FetchContent_Declare(
     cli11
     GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
@@ -54,7 +40,6 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
-# GoogleTest v1.14.0 — unit testing framework.
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
@@ -64,20 +49,16 @@ FetchContent_Declare(
 
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-# Avoid CLI11 dragging in its own test targets.
 set(CLI11_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(httplib cli11 googletest)
 
-# ---------------------------------------------------------------------------
-# Core library — every module compiles into one static lib so both the CLI
-# binary and the test binary can link against it.
-# ---------------------------------------------------------------------------
 add_library(ai_pr_review_core STATIC
     src/diff/parser.cpp
     src/github/api_client.cpp
     src/gateway/llm_gateway.cpp
+    src/rule/engine.cpp
 )
 
 target_include_directories(ai_pr_review_core
@@ -85,9 +66,6 @@ target_include_directories(ai_pr_review_core
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-# cpp-httplib in CMake exposes the `httplib::httplib` target.  The
-# CPPHTTPLIB_OPENSSL_SUPPORT define is required so the header pulls in the
-# HTTPS code paths — without it `httplib::SSLClient` won't exist.
 target_compile_definitions(ai_pr_review_core
     PUBLIC
         CPPHTTPLIB_OPENSSL_SUPPORT
@@ -105,9 +83,6 @@ target_link_libraries(ai_pr_review_core
         Threads::Threads
 )
 
-# ---------------------------------------------------------------------------
-# CLI binary
-# ---------------------------------------------------------------------------
 add_executable(ai-pr-review src/main.cpp)
 target_link_libraries(ai-pr-review
     PRIVATE
@@ -115,9 +90,6 @@ target_link_libraries(ai-pr-review
         CLI11::CLI11
 )
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 enable_testing()
 include(GoogleTest)
 
@@ -128,3 +100,11 @@ target_link_libraries(diff_parser_tests
         GTest::gtest_main
 )
 gtest_discover_tests(diff_parser_tests)
+
+add_executable(rule_engine_tests tests/test_rule_engine.cpp)
+target_link_libraries(rule_engine_tests
+    PRIVATE
+        ai_pr_review_core
+        GTest::gtest_main
+)
+gtest_discover_tests(rule_engine_tests)
