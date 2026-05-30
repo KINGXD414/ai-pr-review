@@ -5,7 +5,6 @@
       "id": "muduo-729",
       "name": "[FIX] compile: missing include of noncopyable.h",
       "pr_url": "https://github.com/chenshuo/muduo/pull/729",
-      "source_dir": "/home/xd/code/muduo-2.0.2",
       "difficulty": "low",
       "expected_keywords": ["noncopyable", "Hiredis", "头文件", "include"],
       "expected_severity_appears": ["低"],
@@ -15,11 +14,37 @@
       "id": "muduo-505",
       "name": "corner case: happens-before in Atomic / Mutex",
       "pr_url": "https://github.com/chenshuo/muduo/pull/505",
-      "source_dir": "/home/xd/code/muduo-2.0.2",
       "difficulty": "high",
       "expected_keywords": ["并发", "原子", "内存"],
       "expected_severity_appears": ["高", "中"],
       "must_not_hallucinate": ["Hiredis", "Channel::handleEvent"]
+    },
+    {
+      "id": "spdlog-3594",
+      "name": "Fix socket closure in tcp_client to prevent errors on invalid socket",
+      "pr_url": "https://github.com/gabime/spdlog/pull/3594",
+      "difficulty": "high",
+      "expected_keywords": ["socket", "close", "INVALID_SOCKET", "closesocket", "空指针"],
+      "expected_severity_appears": ["高"],
+      "must_not_hallucinate": ["async_logger", "rotating_file_sink", "fmt::format"]
+    },
+    {
+      "id": "json-5187",
+      "name": "Fix: update() parent pointers not updated after recursive merge",
+      "pr_url": "https://github.com/nlohmann/json/pull/5187",
+      "difficulty": "medium",
+      "expected_keywords": ["parent", "update", "set_parents", "DIAGNOSTICS", "指针"],
+      "expected_severity_appears": ["中"],
+      "must_not_hallucinate": ["parse_error", "type_error", "dump", "operator[]"]
+    },
+    {
+      "id": "spdlog-3541",
+      "name": "Fix deprecated copy constructor usage of fmt::format_string",
+      "pr_url": "https://github.com/gabime/spdlog/pull/3541",
+      "difficulty": "medium",
+      "expected_keywords": ["deprecated", "format_string", "to_string_view", "copy constructor"],
+      "expected_severity_appears": ["中"],
+      "must_not_hallucinate": ["tcp_client", "socket", "async_logger"]
     }
   ]
 }
