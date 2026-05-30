@@ -362,3 +362,114 @@ ai-pr-review/
 ## License
 
 MIT
+
+---
+
+## 🚀 部署 / Cross-Platform Usage
+
+> 项目原生跨平台（C++17 + CMake + FetchContent 拉取头文件依赖），实测在 Ubuntu 22.04 上 CI 通过。下面给出三种"装到哪都能跑"的姿势，按上手成本排序。
+
+---
+
+### 方式 A：Docker（推荐 — 任意平台一行命令）
+
+适用于 Linux / macOS / Windows（WSL2 或 Docker Desktop）。
+
+**从 GitHub Container Registry 拉镜像**（仓库公开后 `v0.2.0` tag 自动构建）：
+
+```bash
+docker pull ghcr.io/kingxd414/ai-pr-review:latest
+
+docker run --rm \
+  -e DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY \
+  -e GITHUB_TOKEN=$GITHUB_TOKEN \
+  -v "$PWD":/work \
+  ghcr.io/kingxd414/ai-pr-review:latest \
+  --pr https://github.com/chenshuo/muduo/pull/729 \
+  --persona linus --consensus 3 --self-critique \
+  --output /work/review.md
+```
+
+跑完后 `review.md` 直接落到当前目录。镜像大小约 600MB（libclang runtime 占大头）。
+
+**或本地自构建**：
+
+```bash
+docker build -t ai-pr-review:dev .
+docker run --rm ai-pr-review:dev --help
+```
+
+---
+
+### 方式 B：GitHub Release 下载预编译二进制（Linux x86_64）
+
+```bash
+# 下载并解压
+curl -L https://github.com/KINGXD414/ai-pr-review/releases/latest/download/ai-pr-review-v0.2.0-linux-x64.tar.gz \
+  | tar xz
+cd ai-pr-review-v0.2.0-linux-x64
+
+# 直接跑（需 Ubuntu 22.04 同等的 libssl3 / libcurl4 / libclang1-14 runtime）
+./ai-pr-review --version
+```
+
+适合不想编译、只想试跑的 reviewer。
+
+---
+
+### 方式 C：源码编译（三平台通用）
+
+#### Linux（Ubuntu 22.04 / Debian 12）
+
+```bash
+sudo apt-get install -y \
+  build-essential cmake pkg-config \
+  libcurl4-openssl-dev libssl-dev libsqlite3-dev \
+  libspdlog-dev libfmt-dev nlohmann-json3-dev \
+  libclang-14-dev clang-14
+
+cmake -B build -S code -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+./build/ai-pr-review --help
+```
+
+#### macOS（Apple Silicon / Intel）
+
+```bash
+brew install cmake llvm spdlog fmt nlohmann-json
+
+# llvm 在 brew 上不在 PATH，需要显式告诉 CMake 在哪
+cmake -B build -S code -DCMAKE_BUILD_TYPE=Release \
+  -DLIBCLANG_INCLUDE_DIR=$(brew --prefix llvm)/include \
+  -DLIBCLANG_LIBRARY=$(brew --prefix llvm)/lib/libclang.dylib
+cmake --build build -j$(sysctl -n hw.ncpu)
+```
+
+#### Windows（vcpkg + MSVC，理论可行，未在 CI 验证）
+
+```powershell
+vcpkg install curl[ssl] sqlite3 spdlog fmt nlohmann-json
+# libclang 需要单独装 LLVM Windows 二进制：https://releases.llvm.org/
+
+cmake -B build -S code -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Release
+```
+
+> ⚠️ 本项目 72h 开发周期内只在 Ubuntu 22.04 完整 CI 验证。macOS / Windows 编译路径基于 CMake 跨平台特性设计，欢迎 issue / PR 报告平台问题。
+
+---
+
+### 凭证准备
+
+跑之前需要两个环境变量：
+
+| 变量 | 用途 | 获取方式 |
+|---|---|---|
+| `DEEPSEEK_API_KEY` | LLM 调用 | https://platform.deepseek.com/ |
+| `GITHUB_TOKEN` | 拉 PR diff（公开仓库可省，私有仓库必填） | GitHub Settings → Developer settings → PAT |
+
+```bash
+export DEEPSEEK_API_KEY="sk-xxxxxxxx"
+export GITHUB_TOKEN="ghp_xxxxxxxx"
+```
