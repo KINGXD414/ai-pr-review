@@ -1,34 +1,35 @@
 /**
  * @file main.cpp
- * @brief CLI entry point for the AI PR Review assistant (Day 1).
+ * @brief CLI entry point for the AI PR Review assistant.
  *
  * Pipeline: parse args -> resolve credentials -> parse PR URL ->
  * GitHub API fetch -> (optional) AST analysis -> assemble prompt ->
  * DeepSeek chat -> write Markdown report.
+ *
+ * Day-2: added --persona flag for multi-persona reviewing.
  */
 
 #include "analyzer/ast_analyzer.h"
 #include "diff/parser.h"
 #include "gateway/llm_gateway.h"
 #include "github/api_client.h"
+#include "prompt/personas.h"
 
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
 
-#include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
-#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace {
 
-constexpr std::size_t kMaxFilesInPrompt     = 30;
+constexpr std::size_t kMaxFilesInPrompt = 30;
 constexpr std::size_t kMaxPatchLinesPerFile = 200;
 constexpr std::size_t kMaxBodyCharsInPrompt = 2000;
 
@@ -54,39 +55,13 @@ std::string truncate_patch(const std::string& patch, std::size_t max_lines) {
     return oss.str();
 }
 
-std::string build_system_prompt() {
-    return R"(You are a senior C++ / Go / general-purpose code reviewer.
-You read a GitHub Pull Request diff and produce a structured Markdown review.
-Always respond in Simplified Chinese.
-
-Your report MUST use exactly the following three top-level sections, in order:
-
-## 一、变更总结
-* 用 3-6 个 bullet 概括 PR 的整体意图、影响面、改动模块。
-* 不要逐文件复述，要抽象出主线。
-
-## 二、风险代码
-* 列出你认为有风险的修改，每条用如下格式：
-  - **`<文件>:<行号>`** [严重度: 高 / 中 / 低] — <一句话风险描述>
-    - 触发条件 / 后果：…
-    - 建议修复：…
-* 若确实没有风险，写"未发现明显风险"，并说明你检查了哪些维度。
-
-## 三、Review 建议
-* 给作者 3-5 条可执行的建议（命名、注释、测试、可读性、性能等）。
-* 每条用一行 bullet。
-
-写作要求：
-1. 严格基于 diff 给出的内容，禁止虚构未出现的函数名、变量名、行号。
-2. 严重度判断要谨慎，宁可漏报也不要堆砌"高风险"。
-3. 涉及并发 / 内存 / 错误处理 / API 兼容性 时优先标注。
-4. 不要用 ```markdown 围栏包裹整体输出。)";
+std::string build_system_prompt(const std::string& persona) {
+    return aipr::prompt::system_prompt_for(persona);
 }
 
 std::string build_user_prompt(
     const aipr::github::PullRequest& pr,
     const std::vector<aipr::analyzer::AstSummary>& ast_summaries = {}) {
-
     std::ostringstream oss;
     oss << "# PR 元信息\n"
         << "- 仓库：" << pr.locator.owner << "/" << pr.locator.repo << "\n"
@@ -108,7 +83,7 @@ std::string build_user_prompt(
         << kMaxFilesInPrompt << " 个，每个 patch 最多 "
         << kMaxPatchLinesPerFile << " 行）\n\n";
 
-    const std::size_t limit = std::min(pr.files.size(), kMaxFilesInPrompt);
+    const std::size_t limit = std::min<std::size_t>(pr.files.size(), kMaxFilesInPrompt);
     for (std::size_t i = 0; i < limit; ++i) {
         const auto& f = pr.files[i];
         oss << "## " << (i + 1) << ". `" << f.filename << "` ["
@@ -117,9 +92,7 @@ std::string build_user_prompt(
             oss << "_(二进制文件或纯重命名，无 patch)_\n\n";
             continue;
         }
-        oss << "```diff\n"
-            << truncate_patch(f.patch, kMaxPatchLinesPerFile)
-            << "```\n\n";
+        oss << "```diff\n" << truncate_patch(f.patch, kMaxPatchLinesPerFile) << "```\n\n";
     }
 
     if (pr.files.size() > kMaxFilesInPrompt) {
@@ -130,7 +103,8 @@ std::string build_user_prompt(
     // --- AST analysis section (optional, appears when --source-dir is used) ---
     if (!ast_summaries.empty()) {
         std::size_t shown = 0;
-        for (const auto& s : ast_summaries) if (s.ok) ++shown;
+        for (const auto& s : ast_summaries)
+            if (s.ok) ++shown;
         if (shown > 0) {
             oss << "\n# AST 分析（基于 libclang，含 " << shown << " 个文件）\n\n";
             for (const auto& s : ast_summaries) {
@@ -139,7 +113,6 @@ std::string build_user_prompt(
             }
         }
     }
-
     return oss.str();
 }
 
@@ -155,16 +128,19 @@ std::string now_iso() {
 std::string render_report(const aipr::github::PullRequest& pr,
                           const aipr::gateway::LLMResponse& llm,
                           const std::string& model,
-                          std::chrono::milliseconds elapsed) {
+                          std::chrono::milliseconds elapsed,
+                          const std::string& persona) {
     std::ostringstream oss;
     oss << "# AI PR Review 报告\n\n"
-        << "> 由 `ai-pr-review` 自动生成。仅供辅助参考，最终判断以 reviewer 为准。\n\n"
+        << "> 由 `ai-pr-review` 自动生成。仅供辅助参考，最终判断以 reviewer 为准。\n"
+        << "> " << aipr::prompt::persona_badge(persona) << "\n\n"
         << "| 项 | 值 |\n"
         << "| --- | --- |\n"
         << "| PR | [" << pr.locator.owner << "/" << pr.locator.repo
         << " #" << pr.locator.number << "](" << pr.html_url << ") |\n"
         << "| 标题 | " << pr.title << " |\n"
         << "| 作者 | " << pr.author << " |\n"
+        << "| Persona | " << aipr::prompt::persona_badge(persona) << " |\n"
         << "| 文件数 | " << pr.files.size() << " |\n"
         << "| 模型 | " << model << " |\n"
         << "| LLM 调用次数 | " << llm.attempts << " |\n"
@@ -186,46 +162,36 @@ std::string render_report(const aipr::github::PullRequest& pr,
 
 int main(int argc, char** argv) {
     CLI::App app{"AI-powered Pull Request review assistant"};
-    app.set_version_flag("--version", std::string("ai-pr-review 0.1.0"));
+    app.set_version_flag("--version", std::string("ai-pr-review 0.2.0"));
 
     std::string pr_url;
     std::string github_token;
     std::string llm_key;
-    std::string output_path  = "review.md";
-    std::string model        = "deepseek-chat";
-    std::string llm_host     = "api.deepseek.com";
-    std::string llm_path     = "/v1/chat/completions";
-    std::string user_agent   = "ai-pr-review/0.1";
+    std::string output_path = "review.md";
+    std::string model = "deepseek-chat";
+    std::string llm_host = "api.deepseek.com";
+    std::string llm_path = "/v1/chat/completions";
+    std::string user_agent = "ai-pr-review/0.2";
     std::string source_dir;
+    std::string persona = "default";
     int timeout_s = 60;
-    int retries   = 3;
-    bool verbose  = false;
+    int retries = 3;
+    bool verbose = false;
 
-    app.add_option("--pr", pr_url,
-        "GitHub PR URL, e.g. https://github.com/owner/repo/pull/123")
+    app.add_option("--pr", pr_url, "GitHub PR URL, e.g. https://github.com/owner/repo/pull/123")
         ->required();
-    app.add_option("--github-token", github_token,
-        "GitHub PAT (fallback: env GITHUB_TOKEN; empty = anonymous)");
-    app.add_option("--llm-key", llm_key,
-        "DeepSeek API key (fallback: env DEEPSEEK_API_KEY)");
-    app.add_option("--output,-o", output_path,
-        "Path of the Markdown report (default: review.md)");
-    app.add_option("--model", model,
-        "LLM model (default: deepseek-chat)");
-    app.add_option("--llm-host", llm_host,
-        "LLM host (default: api.deepseek.com)");
-    app.add_option("--llm-path", llm_path,
-        "LLM endpoint path (default: /v1/chat/completions)");
-    app.add_option("--user-agent", user_agent,
-        "User-Agent for GitHub requests (GitHub requires this)");
-    app.add_option("--timeout", timeout_s,
-        "Per-attempt timeout in seconds");
-    app.add_option("--retries", retries,
-        "Max retries on LLM transport errors");
-    app.add_option("--source-dir", source_dir,
-        "Local repo root for libclang AST analysis (optional, enables AST context)");
-    app.add_flag("-v,--verbose", verbose,
-        "Enable debug logs");
+    app.add_option("--github-token", github_token, "GitHub PAT (fallback: env GITHUB_TOKEN; empty = anonymous)");
+    app.add_option("--llm-key", llm_key, "DeepSeek API key (fallback: env DEEPSEEK_API_KEY)");
+    app.add_option("--output,-o", output_path, "Path of the Markdown report (default: review.md)");
+    app.add_option("--model", model, "LLM model (default: deepseek-chat)");
+    app.add_option("--llm-host", llm_host, "LLM host (default: api.deepseek.com)");
+    app.add_option("--llm-path", llm_path, "LLM endpoint path (default: /v1/chat/completions)");
+    app.add_option("--user-agent", user_agent, "User-Agent for GitHub requests (GitHub requires this)");
+    app.add_option("--timeout", timeout_s, "Per-attempt timeout in seconds");
+    app.add_option("--retries", retries, "Max retries on LLM transport errors");
+    app.add_option("--source-dir", source_dir, "Local repo root for libclang AST analysis (optional, enables AST context)");
+    app.add_option("--persona", persona, "Reviewer persona: default | linus | mentor | devil | zen");
+    app.add_flag("-v,--verbose", verbose, "Enable debug logs");
 
     CLI11_PARSE(app, argc, argv);
 
@@ -233,14 +199,20 @@ int main(int argc, char** argv) {
     spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
 
     if (github_token.empty()) github_token = env_or_empty("GITHUB_TOKEN");
-    if (llm_key.empty())      llm_key      = env_or_empty("DEEPSEEK_API_KEY");
-
+    if (llm_key.empty()) llm_key = env_or_empty("DEEPSEEK_API_KEY");
     if (llm_key.empty()) {
         spdlog::error("LLM key missing: pass --llm-key or set DEEPSEEK_API_KEY");
         return 2;
     }
     if (github_token.empty()) {
         spdlog::warn("GitHub token empty -- using anonymous access (60 req/h).");
+    }
+
+    // Validate persona early
+    if (persona != "default" && persona != "linus" && persona != "mentor"
+        && persona != "devil" && persona != "zen") {
+        spdlog::error("Unknown persona '{}'. Choose: default | linus | mentor | devil | zen", persona);
+        return 2;
     }
 
     auto loc = aipr::github::parse_pr_url(pr_url);
@@ -257,9 +229,7 @@ int main(int argc, char** argv) {
         spdlog::error("Failed to fetch PR -- see previous logs.");
         return 3;
     }
-    spdlog::info("PR fetched: \"{}\" by {} | {} files",
-                 pr->title, pr->author, pr->files.size());
-
+    spdlog::info("PR fetched: \"{}\" by {} | {} files", pr->title, pr->author, pr->files.size());
     if (pr->files.empty()) {
         spdlog::warn("PR has zero changed files -- nothing to review.");
         return 0;
@@ -273,8 +243,8 @@ int main(int argc, char** argv) {
         namespace fs = std::filesystem;
         for (const auto& f : pr->files) {
             auto ext = fs::path(f.filename).extension().string();
-            if (ext != ".cpp" && ext != ".cc"  && ext != ".cxx" &&
-                ext != ".h"   && ext != ".hpp" && ext != ".hxx")
+            if (ext != ".cpp" && ext != ".cc" && ext != ".cxx" &&
+                ext != ".h" && ext != ".hpp" && ext != ".hxx")
                 continue;
             fs::path p = fs::path(source_dir) / f.filename;
             if (!fs::exists(p)) {
@@ -290,19 +260,20 @@ int main(int argc, char** argv) {
         spdlog::info("AST: analyzed {} file(s) total", ast_summaries.size());
     }
 
-    const std::string system_prompt = build_system_prompt();
-    const std::string user_prompt   = build_user_prompt(*pr, ast_summaries);
+    const std::string system_prompt = build_system_prompt(persona);
+    const std::string user_prompt = build_user_prompt(*pr, ast_summaries);
     spdlog::debug("System prompt: {} chars", system_prompt.size());
     spdlog::debug("User prompt: {} chars", user_prompt.size());
+    spdlog::info("Persona: {}", persona);
 
     aipr::gateway::LLMConfig cfg;
-    cfg.host            = llm_host;
-    cfg.path            = llm_path;
-    cfg.model           = model;
-    cfg.api_key         = llm_key;
+    cfg.host = llm_host;
+    cfg.path = llm_path;
+    cfg.model = model;
+    cfg.api_key = llm_key;
     cfg.timeout_seconds = timeout_s;
-    cfg.max_retries     = retries;
-    cfg.temperature     = 0.2;
+    cfg.max_retries = retries;
+    cfg.temperature = 0.2;
 
     aipr::gateway::LLMGateway gw(cfg);
     spdlog::info("Calling {} on {}{} ...", model, llm_host, llm_path);
@@ -310,18 +281,17 @@ int main(int argc, char** argv) {
     const auto t0 = std::chrono::steady_clock::now();
     auto resp = gw.chat(system_prompt, user_prompt);
     const auto t1 = std::chrono::steady_clock::now();
-    const auto elapsed =
-        std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
 
     if (resp.ok) {
         spdlog::info("LLM ok in {} ms after {} attempt(s), {} chars",
                      elapsed.count(), resp.attempts, resp.content.size());
     } else {
-        spdlog::error("LLM failed after {} attempt(s): {}",
-                      resp.attempts, resp.error);
+        spdlog::error("LLM failed after {} attempt(s): {}", resp.attempts, resp.error);
     }
 
-    const std::string report = render_report(*pr, resp, model, elapsed);
+    const std::string report = render_report(*pr, resp, model, elapsed, persona);
+
     try {
         std::filesystem::path out(output_path);
         if (out.has_parent_path()) {
