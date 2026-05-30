@@ -4,6 +4,7 @@
 #
 # 用法:
 #   ./run_demo.sh [--pr <PR_URL>] [--binary <PATH>]
+#   需从仓库根目录运行
 #
 # 依次运行三个 Demo:
 #   1. Linus Persona  (--persona linus)
