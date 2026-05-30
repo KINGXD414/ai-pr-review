@@ -1,4 +1,5 @@
 #include "rules/engine.h"
+#include "analyzer/ast_analyzer.h"
 
 #include <algorithm>
 #include <cctype>
@@ -8,20 +9,56 @@
 
 namespace aipr::rule {
 
-std::vector<RuleHit> RuleEngine::scan(const std::vector<FileDiff>& diffs) {
-    std::vector<RuleHit> hits;
-    for (const auto& diff : diffs) {
-        check_unpaired_alloc(diff, hits);
-        check_virtual_modify(diff, hits);
-        check_format_only(diff, hits);
-        check_test_file(diff, hits);
-        check_todo_fixme(diff, hits);
-        check_raw_ptr_new(diff, hits);
-        check_c_style_cast(diff, hits);
-        check_memcpy_size(diff, hits);
+// ---------------------------------------------------------------------------
+// Severity helpers
+// ---------------------------------------------------------------------------
+const char* severity_str(Severity s) noexcept {
+    switch (s) {
+        case Severity::Info:  return "info";
+        case Severity::Warn:  return "warn";
+        case Severity::Error: return "error";
     }
+    return "info";
+}
+
+// ---------------------------------------------------------------------------
+// Engine::run — primary interface (Issue #1)
+// ---------------------------------------------------------------------------
+std::vector<RuleHit> RuleEngine::run(const ParsedDiff& diff,
+                                     const analyzer::AstSummary* ast) {
+    std::vector<RuleHit> hits;
+
+    for (const auto& file_diff : diff.files) {
+        check_unpaired_alloc(file_diff, hits);
+        check_virtual_modify(file_diff, hits);
+        check_format_only(file_diff, hits);
+        check_test_file(file_diff, hits);
+        check_todo_fixme(file_diff, hits);
+        check_raw_ptr_new(file_diff, hits);
+        check_c_style_cast(file_diff, hits);
+        check_memcpy_size(file_diff, hits);
+    }
+
+    // AST enrichment: when AST context is available, we can upgrade severity
+    // or add supplementary findings. Currently a no-op placeholder — the
+    // AST→rule integration is a follow-up per ADR-001.
+    (void)ast;
+
     return hits;
 }
+
+// ---------------------------------------------------------------------------
+// Engine::scan — legacy interface
+// ---------------------------------------------------------------------------
+std::vector<RuleHit> RuleEngine::scan(const std::vector<FileDiff>& diffs) {
+    ParsedDiff pd;
+    pd.files = diffs;
+    return run(pd, nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Rule implementations
+// ---------------------------------------------------------------------------
 
 void RuleEngine::check_unpaired_alloc(const FileDiff& diff,
                                       std::vector<RuleHit>& hits) {
@@ -52,9 +89,10 @@ void RuleEngine::check_unpaired_alloc(const FileDiff& diff,
     }
 
     if (has_alloc && !has_dealloc) {
-        hits.push_back({diff.filename, alloc_line, "high",
-                        "unpaired_alloc",
-                        "检测到 " + alloc_kind + " 但未发现对应的 free/delete，可能存在内存泄漏"});
+        hits.push_back({"unpaired_alloc", Severity::Error, diff.filename,
+                        alloc_line,
+                        "检测到 " + alloc_kind + " 但未发现对应的 free/delete，可能存在内存泄漏",
+                        "确保在分配后添加对应的 free/delete，或使用智能指针管理生命周期"});
     }
 }
 
@@ -65,9 +103,10 @@ void RuleEngine::check_virtual_modify(const FileDiff& diff,
         if (line.find("override") != std::string::npos ||
             line.find("virtual") != std::string::npos) {
             int ln = diff.removed_line_nums.empty() ? 0 : diff.removed_line_nums[i];
-            hits.push_back({diff.filename, ln, "high",
-                            "virtual_modify",
-                            "修改了虚函数/override 方法，可能影响多态行为和派生类"});
+            hits.push_back({"virtual_modify", Severity::Error, diff.filename,
+                            ln,
+                            "修改了虚函数/override 方法，可能影响多态行为和派生类",
+                            "审查所有派生类是否受影响，确认多态行为未被破坏"});
             break;
         }
     }
@@ -94,9 +133,10 @@ void RuleEngine::check_format_only(const FileDiff& diff,
     }
 
     if (all_whitespace && !diff.added_lines.empty()) {
-        hits.push_back({diff.filename, diff.added_line_nums.empty() ? 0 : diff.added_line_nums[0],
-                        "low", "format_only",
-                        "纯格式化变更（仅空格/缩进），无逻辑影响"});
+        hits.push_back({"format_only", Severity::Info, diff.filename,
+                        diff.added_line_nums.empty() ? 0 : diff.added_line_nums[0],
+                        "纯格式化变更（仅空格/缩进），无逻辑影响",
+                        ""});
     }
 }
 
@@ -110,8 +150,9 @@ void RuleEngine::check_test_file(const FileDiff& diff,
                    name.find("/tests/") != std::string::npos;
 
     if (is_test) {
-        hits.push_back({diff.filename, 0, "low", "test_file",
-                        "修改了测试文件，风险较低"});
+        hits.push_back({"test_file", Severity::Info, diff.filename, 0,
+                        "修改了测试文件，风险较低",
+                        ""});
     }
 }
 
@@ -123,8 +164,10 @@ void RuleEngine::check_todo_fixme(const FileDiff& diff,
             line.find("FIXME") != std::string::npos ||
             line.find("HACK") != std::string::npos) {
             int ln = diff.added_line_nums.empty() ? 0 : diff.added_line_nums[i];
-            hits.push_back({diff.filename, ln, "medium", "todo_fixme",
-                            "新增 TODO/FIXME/HACK 标记，表明存在待处理问题"});
+            hits.push_back({"todo_fixme", Severity::Warn, diff.filename,
+                            ln,
+                            "新增 TODO/FIXME/HACK 标记，表明存在待处理问题",
+                            "处理标记后再合入主分支"});
         }
     }
 }
@@ -140,8 +183,10 @@ void RuleEngine::check_raw_ptr_new(const FileDiff& diff,
                 line.find("make_unique") == std::string::npos &&
                 line.find("make_shared") == std::string::npos) {
                 int ln = diff.added_line_nums.empty() ? 0 : diff.added_line_nums[i];
-                hits.push_back({diff.filename, ln, "medium", "raw_ptr_new",
-                                "使用裸指针 new，建议改用 std::unique_ptr 或 std::make_unique"});
+                hits.push_back({"raw_ptr_new", Severity::Warn, diff.filename,
+                                ln,
+                                "使用裸指针 new，建议改用智能指针",
+                                "改用 std::unique_ptr 或 std::make_unique"});
             }
         }
     }
@@ -149,12 +194,10 @@ void RuleEngine::check_raw_ptr_new(const FileDiff& diff,
 
 void RuleEngine::check_c_style_cast(const FileDiff& diff,
                                     std::vector<RuleHit>& hits) {
-    // 匹配 (Type) 或 (Type*) 模式的 C 风格转换
     static const std::regex re(R"(\(\s*[A-Za-z_][A-Za-z0-9_:]*\s*\**\s*\))");
     for (size_t i = 0; i < diff.added_lines.size(); ++i) {
         const auto& line = diff.added_lines[i];
         if (std::regex_search(line, re)) {
-            // 排除常见合法用法
             if (line.find("return") == std::string::npos &&
                 line.find("delete") == std::string::npos &&
                 line.find("sizeof(") == std::string::npos &&
@@ -163,8 +206,10 @@ void RuleEngine::check_c_style_cast(const FileDiff& diff,
                 line.find("const_cast") == std::string::npos &&
                 line.find("dynamic_cast") == std::string::npos) {
                 int ln = diff.added_line_nums.empty() ? 0 : diff.added_line_nums[i];
-                hits.push_back({diff.filename, ln, "low", "c_style_cast",
-                                "使用 C 风格强制转换，建议改用 static_cast/const_cast 等"});
+                hits.push_back({"c_style_cast", Severity::Info, diff.filename,
+                                ln,
+                                "使用 C 风格强制转换，建议改用 C++ cast",
+                                "改用 static_cast / const_cast / reinterpret_cast"});
             }
         }
     }
@@ -172,21 +217,19 @@ void RuleEngine::check_c_style_cast(const FileDiff& diff,
 
 void RuleEngine::check_memcpy_size(const FileDiff& diff,
                                    std::vector<RuleHit>& hits) {
-    // 检测 memcpy/memset/memmove 中使用 sizeof(变量) 的情况
-    // sizeof(指针变量) 只返回指针大小而非缓冲区大小，是常见 bug
     static const std::regex mem_func_re(R"((memcpy|memset|memmove)\s*\()");
     static const std::regex sizeof_var_re(R"(sizeof\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\))");
     for (size_t i = 0; i < diff.added_lines.size(); ++i) {
         const auto& line = diff.added_lines[i];
         if (std::regex_search(line, mem_func_re) &&
             std::regex_search(line, sizeof_var_re)) {
-            // 排除 sizeof(数组) 的合法用法：sizeof(buf) 中 buf 名字含 "size" / "len" / "buf" / "array"
-            // 或者 sizeof 是带类型的如 sizeof(int)
             static const std::regex sizeof_type_re(R"(sizeof\s*\(\s*(int|char|long|short|float|double|void|unsigned|uint\d+_t|int\d+_t|size_t|ssize_t))");
             if (!std::regex_search(line, sizeof_type_re)) {
                 int ln = diff.added_line_nums.empty() ? 0 : diff.added_line_nums[i];
-                hits.push_back({diff.filename, ln, "high", "memcpy_size",
-                                "memcpy/memset 的 sizeof 参数可能是指针而非数组，sizeof(指针)只返回指针大小"});
+                hits.push_back({"memcpy_size", Severity::Error, diff.filename,
+                                ln,
+                                "memcpy/memset 的 sizeof 参数可能是指针而非数组",
+                                "使用 sizeof(数组) 替代 sizeof(指针)，或显式传入缓冲区大小"});
             }
         }
     }
