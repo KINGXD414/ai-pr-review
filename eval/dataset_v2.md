@@ -181,6 +181,29 @@
 
 ---
 
+## #9 nlohmann/json PR #3964 — 迭代器失效导致 use-after-free（高难度并发样本）⭐
+
+- **URL**: https://github.com/nlohmann/json/pull/3964
+- **状态**: Merged
+- **难度**: 🔴 高
+- **变更**: 修复 `insert()` 和 `emplace()` 在插入元素时导致迭代器失效的问题。当 JSON 对象是 object 类型时，插入新 key 可能触发内部存储的 rehash，导致先前获取的迭代器指向已释放内存
+
+**人工标注**：
+- 真实问题：STL 容器的经典陷阱——迭代器失效（iterator invalidation）
+- 根因：`json::object_t` 底层是 `std::map`（有序），插入不触发 rehash，迭代器安全；但 `json::array_t` 底层是 `std::vector`，插入可能触发 reallocation，所有迭代器失效
+- 实际危害：use-after-free，堆上的内存已被释放但迭代器仍持有旧指针，解引用是 UB
+- 修复复杂度：需要在 insert/emplace 前保存距离或索引，而非迭代器
+
+**AI 预期输出**：
+- ✅ 识别这是迭代器失效 / use-after-free 问题，标 🔴 高风险
+- ✅ 摘要提到「iterator invalidation / use-after-free / insert reallocation」
+- ⭐ 加分项：指出 std::vector 插入时 reallocation 导致迭代器失效的 C++ 标准规则
+- ❌ 失败模式：标为中低风险"小修复"，忽略迭代器失效的严重后果（UB → 任意代码执行）
+
+**为什么值钱**：迭代器失效是 C++ 最经典也最隐蔽的 bug 之一。大多数 AI 会看到"修复 insert"就觉得是普通 bugfix，但这个的实质是内存安全漏洞——UB 导致的 use-after-free 可被利用。
+
+---
+
 ## 评测指标
 
 | 指标 | 算法 | 目标 |
@@ -194,7 +217,7 @@
 
 | 难度 | 数量 | PR 编号 |
 |------|------|---------|
-| 🔴 高 | 2 | #1, #4 |
+| 🔴 高 | 3 | #1, #4, #9 |
 | 🟡 中 | 4 | #3, #5, #6, #8 |
 | 🟢 低 | 2 | #2, #7 |
 
@@ -208,3 +231,4 @@
 | 异常安全/内存问题 | #4 |
 | 过度优化识别 | #6 |
 | 小众场景合规性 | #8 |
+| 迭代器失效/UB | #9 |
