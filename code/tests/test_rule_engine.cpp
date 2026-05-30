@@ -2,7 +2,7 @@
  * @file test_rule_engine.cpp
  * @brief Unit tests for aipr::rule::RuleEngine.
  */
-#include "rule/engine.h"
+#include "rules/engine.h"
 
 #include <gtest/gtest.h>
 #include <set>

@@ -120,7 +120,7 @@ add_library(ai_pr_review_core STATIC
     src/github/api_client.cpp
     src/gateway/llm_gateway.cpp
     src/analyzer/ast_analyzer.cpp
-    src/rule/engine.cpp
+    src/rules/engine.cpp
 )
 
 target_include_directories(ai_pr_review_core PUBLIC
