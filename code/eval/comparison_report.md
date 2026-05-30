@@ -74,12 +74,12 @@ v0.2.0 新增三招（互斥，不可同时启用）：
 
 ```bash
 cd code/build
-./ai-pr-eval --cases ../../eval/cases.json \
+./ai-pr-eval --cases ../eval/cases.json \
              --binary ./ai-pr-review \
              [--persona linus | --self-critique | --consensus 3] \
              --github-token $GITHUB_TOKEN \
              --llm-key $DEEPSEEK_KEY \
-             --out-dir ../../eval/runs/<config-name>
+             --out-dir ../eval/runs/<config-name>
 ```
 
 ## 5. 结论与下一步
