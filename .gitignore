@@ -4,3 +4,8 @@ code/_build_skip/
 *.a
 .vscode/
 .idea/
+
+# Evaluation runtime artifacts (do not commit per-run outputs)
+code/eval/runs/
+code/eval/run_report_*.md
+code/Testing/
