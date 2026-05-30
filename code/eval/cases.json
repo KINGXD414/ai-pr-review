@@ -1,0 +1,25 @@
+{
+  "_comment": "AI PR Review evaluation dataset (machine-readable mirror of eval/dataset_v2.md). Scoring: keyword 40% + severity 30% + no-hallucination 30%.",
+  "cases": [
+    {
+      "id": "muduo-729",
+      "name": "[FIX] compile: missing include of noncopyable.h",
+      "pr_url": "https://github.com/chenshuo/muduo/pull/729",
+      "source_dir": "/home/xd/code/muduo-2.0.2",
+      "difficulty": "low",
+      "expected_keywords": ["noncopyable", "Hiredis", "头文件", "include"],
+      "expected_severity_appears": ["低"],
+      "must_not_hallucinate": ["EventLoop::loop", "Channel::handleEvent", "TcpConnection::send"]
+    },
+    {
+      "id": "muduo-505",
+      "name": "corner case: happens-before in Atomic / Mutex",
+      "pr_url": "https://github.com/chenshuo/muduo/pull/505",
+      "source_dir": "/home/xd/code/muduo-2.0.2",
+      "difficulty": "high",
+      "expected_keywords": ["并发", "原子", "内存"],
+      "expected_severity_appears": ["高", "中"],
+      "must_not_hallucinate": ["Hiredis", "Channel::handleEvent"]
+    }
+  ]
+}

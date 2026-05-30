@@ -121,6 +121,7 @@ add_library(ai_pr_review_core STATIC
     src/gateway/llm_gateway.cpp
     src/analyzer/ast_analyzer.cpp
     src/rules/engine.cpp
+    src/eval/runner.cpp
 )
 
 target_include_directories(ai_pr_review_core PUBLIC
@@ -182,3 +183,12 @@ target_link_libraries(rule_engine_tests PRIVATE
     GTest::gtest_main
 )
 add_test(NAME rule_engine_tests COMMAND rule_engine_tests)
+
+# ---------------------------------------------------------------------------
+# Evaluation harness binary (Day 3)
+# ---------------------------------------------------------------------------
+add_executable(ai-pr-eval src/eval_main.cpp)
+target_link_libraries(ai-pr-eval PRIVATE
+    ai_pr_review_core
+    CLI11::CLI11
+)
