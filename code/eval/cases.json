@@ -20,6 +20,36 @@
       "expected_keywords": ["并发", "原子", "内存"],
       "expected_severity_appears": ["高", "中"],
       "must_not_hallucinate": ["Hiredis", "Channel::handleEvent"]
+    },
+    {
+      "id": "spdlog-2856",
+      "name": "fix: registry drop logic causes use-after-free",
+      "pr_url": "https://github.com/gabime/spdlog/pull/2856",
+      "source_dir": "/home/xd/code/spdlog-1.15.0",
+      "difficulty": "high",
+      "expected_keywords": ["use-after-free", "悬挂指针", "registry", "drop"],
+      "expected_severity_appears": ["高"],
+      "must_not_hallucinate": ["async_logger::flush", "fmt::format", "stdout_sink"]
+    },
+    {
+      "id": "json-3911",
+      "name": "fix: iterator invalidation in insert_iterator",
+      "pr_url": "https://github.com/nlohmann/json/pull/3911",
+      "source_dir": "/home/xd/code/json-3.11.3",
+      "difficulty": "high",
+      "expected_keywords": ["迭代器失效", "insert", "UB", "容器"],
+      "expected_severity_appears": ["高"],
+      "must_not_hallucinate": ["parse_error", "type_error::operator[]", "dump"]
+    },
+    {
+      "id": "spdlog-2912",
+      "name": "fix: add missing include for std::shared_mutex",
+      "pr_url": "https://github.com/gabime/spdlog/pull/2912",
+      "source_dir": "/home/xd/code/spdlog-1.15.0",
+      "difficulty": "medium",
+      "expected_keywords": ["头文件", "include", "shared_mutex", "编译"],
+      "expected_severity_appears": ["中", "低"],
+      "must_not_hallucinate": ["async_logger", "fmt::runtime", "rotating_file_sink"]
     }
   ]
 }
