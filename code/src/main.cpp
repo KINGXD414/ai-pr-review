@@ -8,6 +8,7 @@
  *
  * Day-2: added --persona flag for multi-persona reviewing.
  * Day-2: added --consensus N flag for multi-vote consensus.
+ * Day-2: added --self-critique flag for two-pass hallucination filter.
  */
 
 #include "analyzer/ast_analyzer.h"
@@ -16,6 +17,7 @@
 #include "github/api_client.h"
 #include "prompt/personas.h"
 #include "prompt/consensus.h"
+#include "prompt/self_critique.h"
 
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
@@ -138,7 +140,8 @@ std::string render_report(const aipr::github::PullRequest& pr,
                           const aipr::gateway::LLMResponse& llm,
                           const std::string& model,
                           std::chrono::milliseconds elapsed,
-                          const std::string& persona) {
+                          const std::string& persona,
+                          bool self_critique_used) {
     std::ostringstream oss;
     oss << "# AI PR Review 报告\n\n"
         << "> 由 `ai-pr-review` 自动生成。仅供辅助参考，最终判断以 reviewer 为准。\n"
@@ -147,6 +150,9 @@ std::string render_report(const aipr::github::PullRequest& pr,
         oss << "> 🗳️ Consensus 模式 — " << consensus_n
             << " 次独立审查后按多数票合成，保留阈值 ⌈N/2⌉="
             << ((consensus_n + 1) / 2) << "\n";
+    }
+    if (self_critique_used) {
+        oss << "> 🪞 Self-Critique 模式 — 二审已对一审进行幻觉过滤、严重度校准、建议强化\n";
     }
     oss << "\n"
         << "| 项 | 值 |\n"
@@ -162,6 +168,7 @@ std::string render_report(const aipr::github::PullRequest& pr,
                                 ? ("✅ N=" + std::to_string(consensus_n)
                                    + "（阈值 " + std::to_string((consensus_n + 1) / 2) + "）")
                                 : std::string("未启用")) << " |\n"
+        << "| Self-Critique | " << (self_critique_used ? "✅ 启用（二阶段）" : "未启用") << " |\n"
         << "| LLM 调用次数 | " << llm.attempts << " |\n"
         << "| 用时 | " << elapsed.count() << " ms |\n"
         << "| 生成时间 | " << now_iso() << " |\n\n"
@@ -197,6 +204,7 @@ int main(int argc, char** argv) {
     int retries     = 3;
     bool verbose    = false;
     int consensus_n = 1;
+    bool self_critique = false;
 
     app.add_option("--pr", pr_url,
         "GitHub PR URL, e.g. https://github.com/owner/repo/pull/123")
@@ -226,6 +234,8 @@ int main(int argc, char** argv) {
     app.add_option("--consensus", consensus_n,
         "Run N independent reviews (N in [1,5]) and consolidate by majority vote (default 1)")
         ->check(CLI::Range(1, 5));
+    app.add_flag("--self-critique", self_critique,
+        "Enable two-pass review: generate -> self-audit -> refined report");
     app.add_flag("-v,--verbose", verbose,
         "Enable debug logs");
 
@@ -365,6 +375,30 @@ int main(int argc, char** argv) {
                          resp2.error);
         }
     }
+
+    // --- Self-Critique stage: optional second-pass audit on the final report ---
+    bool self_critique_used = false;
+    if (self_critique && resp.ok) {
+        spdlog::info("Self-Critique enabled: running second-pass audit ...");
+        aipr::gateway::LLMConfig cfg3 = cfg;
+        cfg3.temperature = 0.2; // critique should be deterministic
+        aipr::gateway::LLMGateway gw3(cfg3);
+        const std::string critique_sys  = aipr::prompt::critique_system_prompt();
+        const std::string critique_user =
+            aipr::prompt::build_critique_user_prompt(user_prompt, resp.content);
+        auto resp3 = gw3.chat(critique_sys, critique_user);
+        total_attempts += resp3.attempts;
+        if (resp3.ok) {
+            spdlog::info("Self-Critique stage ok after {} attempt(s), {} chars",
+                         resp3.attempts, resp3.content.size());
+            resp = std::move(resp3);
+            self_critique_used = true;
+        } else {
+            spdlog::warn("Self-Critique stage failed: {} -- keeping previous result as final",
+                         resp3.error);
+        }
+    }
+
     resp.attempts = total_attempts;
 
     const auto t1 = std::chrono::steady_clock::now();
@@ -379,7 +413,7 @@ int main(int argc, char** argv) {
                       resp.attempts, resp.error);
     }
 
-    const std::string report = render_report(*pr, consensus_n, resp, model, elapsed, persona);
+    const std::string report = render_report(*pr, consensus_n, resp, model, elapsed, persona, self_critique_used);
 
     try {
         std::filesystem::path out(output_path);
