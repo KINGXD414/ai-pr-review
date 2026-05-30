@@ -3,7 +3,7 @@
  * @brief Rule-based static analysis engine for PR review.
  *
  * Day-2 update: RuleHit struct aligned with Issue #1 architecture
- * (rule_id / severity / file / line / message / suggestion).
+ * (rule_id / severity / file / line / message / suggestion / confidence).
  * New Engine::run() interface accepts ParsedDiff + optional AstSummary.
  */
 #pragma once
@@ -38,6 +38,7 @@ struct RuleHit {
     int         line{0};     ///< 1-based line number (0 = unknown).
     std::string message;     ///< Human-readable description of the finding.
     std::string suggestion;  ///< Suggested fix or action (may be empty).
+    double       confidence{0.8};  ///< Confidence score; AST enrichment will make dynamic.
 };
 
 // ---------------------------------------------------------------------------

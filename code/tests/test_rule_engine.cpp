@@ -3,7 +3,7 @@
  * @brief Unit tests for aipr::rule::RuleEngine.
  *
  * Updated for Issue #1 architecture:
- * - RuleHit fields: rule_id / severity / file / line / message / suggestion
+ * - RuleHit fields: rule_id / severity / file / line / message / suggestion / confidence
  * - Engine::run(ParsedDiff, AstSummary*) interface
  * - Engine::scan() legacy interface still works
  */
@@ -408,4 +408,7 @@ TEST(RuleEngine, RuleHitFieldsArePopulated) {
     if (h.rule_id == "unpaired_alloc") {
         EXPECT_FALSE(h.suggestion.empty());
     }
+    // confidence defaults to 0.8 per ADR-003 Decision 1
+    EXPECT_GT(h.confidence, 0.0);
+    EXPECT_LE(h.confidence, 1.0);
 }
