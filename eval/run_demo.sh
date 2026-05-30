@@ -10,6 +10,8 @@
 #   2. Self-Critique  (--self-critique)
 #   3. Consensus N=3  (--consensus 3)
 #
+# 前置依赖: 需先合入 PR #13/#14/#15 (三招功能)
+#
 # 环境变量 (必需):
 #   DEEPSEEK_API_KEY   DeepSeek API Key
 #   GITHUB_TOKEN       GitHub PAT (可选, 不设则匿名 60req/h)
@@ -21,7 +23,7 @@ set -euo pipefail
 
 # ---- 默认参数 ----
 PR_URL="https://github.com/chenshuo/muduo/pull/505"
-BINARY="${BINARY:-./build/ai-pr-review}"
+BINARY="${BINARY:-./code/build/ai-pr-review}"
 OUTPUT_DIR="eval/demo-output"
 
 # ---- 解析参数 ----
@@ -43,11 +45,13 @@ if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
 fi
 if [[ ! -x "$BINARY" ]]; then
     echo "ERROR: Binary not found or not executable: $BINARY" >&2
-    echo "Hint: cd code/build && cmake .. && make -j\$(nproc)" >&2
+    echo "Hint: cd code && mkdir -p build && cd build && cmake .. && make -j$(nproc)" >&2
     exit 1
 fi
 
 mkdir -p "$OUTPUT_DIR"
+
+TOTAL_START=$(date +%s%N)
 
 echo "========================================="
 echo "  AI PR Review — 差异化 Demo"
@@ -115,6 +119,9 @@ echo "    Report: $OUTPUT_DIR/demo3-consensus-3.md"
 echo ""
 
 # ---- 汇总 ----
+TOTAL_END=$(date +%s%N)
+TOTAL_MS=$(( (TOTAL_END - TOTAL_START) / 1000000 ))
+
 echo "========================================="
 echo "  Demo 完成! 报告目录: $OUTPUT_DIR/"
 echo "========================================="
@@ -122,6 +129,8 @@ echo ""
 echo "  1. demo1-linus-persona.md   Linus 人格化审查"
 echo "  2. demo2-self-critique.md   自我反思链审查"
 echo "  3. demo3-consensus-3.md     3 次投票共识审查"
+echo ""
+echo "  三招总耗时: ${TOTAL_MS}ms"
 echo ""
 echo "  对比三份报告可以看到："
 echo "  - Linus 模式：语气犀利，重点关注代码质量"
