@@ -36,11 +36,11 @@
 | Config | Flag | 综合平均 | 单次耗时 | vs baseline |
 |--------|------|---------|---------|-------------|
 | baseline | （无） | **82%** | 7.6s | — |
-| persona-linus | `--persona linus` | **87%** 🏆 | 8.6s | **+5%** |
+| persona-linus | `--persona linus` | **87%** | 8.6s | **+5%** |
 | self-critique | `--self-critique` | **80%** | 12.2s | -2% |
 | consensus-3 | `--consensus 3` | **82%** | 23.4s | 持平（3x 耗时） |
 
-### 3.2 按 case 拆解（这才是真相）
+### 3.2 按 case 拆解
 
 | Case | 难度 | baseline | persona | critique | consensus |
 |------|------|---------|---------|----------|-----------|
@@ -52,63 +52,70 @@
 
 ## 4. 真实结论（覆盖之前的预期）
 
-### 反直觉发现
+### 4.1 medium 难度撞顶
 
-1. **medium 难度撞顶**——baseline 就 100%，三招没有空间提升。说明评测集 medium case 的关键词覆盖面偏宽。
+baseline 就 100%，三招没有空间提升。说明评测集 medium case 的关键词覆盖面偏宽。
 
-2. **persona-linus 是 high 难度的杀手**（注意：两个 high case 提升幅度差距大，不是均匀 +30%）
-   - spdlog-3594: **+30%**（62% → 92%）— 单 case 最大提升
-   - muduo-505: **+15%**（58% → 73%）— 同 high 难度但提升仅一半
-   - high 难度算术平均提升约 **+22.5%**，不要把 +30% 当成 high case 的统一收益
-   - 机制：Linus 人设输出更严苛、关键词命中率显著提升、严重度更敢标"高"
-   - 副作用：low case 把"低"严重度标错（太凶）→ -20%
+### 4.2 persona-linus 是 high 难度的杀手
 
-3. **self-critique 在 high 难度有效，但被 low case 拖**
-   - muduo-505 (high): +13%（58% → 71%）
-   - muduo-729 (low): -20%（90% → 70%）— 二审反思加重了语气，丢"低"标签
-   - **平均 -2% 是低 case 拖累的假象**
+注意：两个 high case 提升幅度差距大，不是均匀 +30%。
 
-4. **consensus-3 这版不值这个钱** ⚠️
-   - 5 case 全部跟 baseline 一字不差
-   - 耗时 3x（23.4s vs 7.6s）
-   - 根因：meta-review 合并 prompt 过于保守，没产生有效投票
-   - 改进路径：调 meta-review prompt 让它更 aggressive，或换 consensus N=5 + 高 temperature
+- spdlog-3594: +30%（62% → 92%）—— 单 case 最大提升
+- muduo-505: +15%（58% → 73%）—— 同 high 难度但提升仅一半
+- high 难度算术平均提升约 +22.5%，不要把 +30% 当成 high case 的统一收益
+- 机制：Linus 人设输出更严苛，关键词命中率显著提升，严重度更敢标"高"
+- 副作用：low case 把"低"严重度标错（太凶）→ -20%
 
-### 工程结论
+### 4.3 self-critique 在 high 难度有效，但被 low case 拖
 
-- v0.2.0 的真实卖点是 **persona** 而非 self-critique
+- muduo-505 (high): +13%（58% → 71%）
+- muduo-729 (low): -20%（90% → 70%）—— 二审反思加重了语气，丢"低"标签
+- 平均 -2% 是低 case 拖累的假象
+
+### 4.4 consensus-3 这版不值这个钱
+
+- 5 case 全部跟 baseline 一字不差
+- 耗时 3x（23.4s vs 7.6s）
+- 根因：meta-review 合并 prompt 过于保守，没产生有效投票
+- 改进路径：调 meta-review prompt 让它更 aggressive，或换 consensus N=5 + 高 temperature
+
+### 4.5 工程结论
+
+- v0.2.0 的真实卖点是 persona 而非 self-critique
 - 三招应该按 case 难度自适应启用，而不是一锅端
 - consensus 还需要二次迭代才能落地（保留为 future work）
 
 ## 5. 评测方法学反思
 
-### 评测集偏差
+### 5.1 评测集偏差
 
 - medium 难度 case 关键词覆盖面太宽（撞顶），无法区分招式优劣
 - Day-4+ 需要增加 medium 难度的细粒度 case（如：关键词从 5 个收紧到 2-3 个）
 
-### 严重度评分粒度
+### 5.2 严重度评分粒度
 
 - 当前严重度只看"标签是否出现"，未考虑"标对位置"
 - persona-linus 会把所有问题都标"高/中"，丢失"低"标签 → 严重度命中下降
 - 改进：严重度按 PR 整体风险评分，而非逐项标签匹配
 
-### 单次 LLM 调用偏差
+### 5.3 单次 LLM 调用偏差
 
 - 同一 case 多次跑可能出现 ±5% 波动（DeepSeek 非确定性输出）
 - 当前为 1 次跑结果，没做多次平均
 - 改进：每个 case 跑 3 次取平均，但工时是 3x
 
-## 6. Demo 视频引用素材
+## 6. Demo 引用要点
 
-**核心故事**："我们以为三招都会涨，结果数据告诉我们事实复杂得多。"
+核心叙事：我们以为三招都会涨，结果数据告诉我们事实复杂得多。
 
-**关键数据点**：
-- 🔥 spdlog-3594 high 难度：persona-linus +30%
-- ⚠️ muduo-729 low 难度：persona/critique 都掉了 20%（人设太凶丢低标）
-- ❌ consensus-3 完全没涨，但贵 3 倍
+关键数据点：
 
-**诚实分析卖点**：
+- spdlog-3594 high 难度：persona-linus +30%
+- muduo-729 low 难度：persona/critique 都掉了 20%（人设太凶丢低标）
+- consensus-3 完全没涨，但贵 3 倍
+
+诚实分析要点：
+
 - 不交付"招招涨"的虚假产品
 - 提供 4 config 矩阵让用户按场景选
 - 高难度复杂 PR → persona-linus

@@ -6,20 +6,20 @@
 
 ### 输出格式
 
-1. **简单字符串** — 每条命中返回一行文本，灵活但无法程序化处理
-2. **结构化 RuleHit** — 每条命中包含固定字段（rule_id / severity / file / line / message / suggestion），可被下游 LLM Gateway 和评测框架程序化消费
-3. **JSON 字典** — 灵活但缺乏类型约束，C++ 端需要额外的 schema 校验
+1. 简单字符串 — 每条命中返回一行文本，灵活但无法程序化处理
+2. 结构化 RuleHit — 每条命中包含固定字段（rule_id / severity / file / line / message / suggestion），可被下游 LLM Gateway 和评测框架程序化消费
+3. JSON 字典 — 灵活但缺乏类型约束，C++ 端需要额外的 schema 校验
 
 ### Engine 接口
 
-1. **scan() 直接扫描 diff** — 简单，但无法接入 AST 上下文
-2. **run(diff, ast = nullptr)** — 可选退化设计：不传 AST 时退化为纯 regex 模式，传了则启用跨文件检查
-3. **run(diff) + set_ast(ast)** — 分步调用，灵活但调用时序容易出错
+1. `scan()` 直接扫描 diff — 简单，但无法接入 AST 上下文
+2. `run(diff, ast = nullptr)` — 可选退化设计：不传 AST 时退化为纯 regex 模式，传了则启用跨文件检查
+3. `run(diff) + set_ast(ast)` — 分步调用，灵活但调用时序容易出错
 
 ### rule_id 命名
 
-1. **编号式（R001, R002...）** — 有序，但加规则需维护编号表，可读性差
-2. **snake_case（unpaired_alloc, virtual_modify...）** — 自解释，无需维护编号，未来扩展零成本
+1. 编号式（R001, R002...）— 有序，但加规则需维护编号表，可读性差
+2. snake_case（unpaired_alloc, virtual_modify...）— 自解释，无需维护编号，未来扩展零成本
 
 ## Decision
 
@@ -40,9 +40,9 @@ struct RuleHit {
 ```
 
 选择理由：
-- **下游可消费**：LLM Gateway 可将 RuleHit[] 注入 prompt，评测框架可按 severity 维度统计
-- **类型安全**：enum class Severity 避免 string 比较的拼写错误
-- **可扩展**：confidence 字段为 AST enrichment 预留，当前为常量 0.8
+- 下游可消费：LLM Gateway 可将 RuleHit[] 注入 prompt，评测框架可按 severity 维度统计
+- 类型安全：enum class Severity 避免 string 比较的拼写错误
+- 可扩展：confidence 字段为 AST enrichment 预留，当前为常量 0.8
 
 ### 2. Engine::run(diff, ast = nullptr) 可选退化接口
 
@@ -57,16 +57,16 @@ private:
 ```
 
 选择理由：
-- **降低部署门槛**：不依赖 libclang 即可运行纯 regex 模式，AST 为可选增强
-- **向后兼容**：scan() 保留为 legacy 接口，内部委托 run()，已调用的代码无需修改
-- **清晰语义**：调用方通过是否传 ast 参数明确选择模式
+- 降低部署门槛：不依赖 libclang 即可运行纯 regex 模式，AST 为可选增强
+- 向后兼容：scan() 保留为 legacy 接口，内部委托 run()，已调用的代码无需修改
+- 清晰语义：调用方通过是否传 ast 参数明确选择模式
 
 ### 3. rule_id 采用 snake_case
 
 选择理由：
-- **可读性优先**：`unpaired_alloc` 比 `R001` 自解释
-- **零维护成本**：新增规则不需要维护编号表
-- **搜索友好**：grep / IDE 搜索 rule_id 即可定位
+- 可读性优先：`unpaired_alloc` 比 `R001` 自解释
+- 零维护成本：新增规则不需要维护编号表
+- 搜索友好：grep / IDE 搜索 rule_id 即可定位
 
 ## Consequences
 

@@ -34,11 +34,11 @@ inline constexpr std::string_view kPersonaZen     = "zen";
 
 /// Returns a human-readable badge for the report header.
 inline std::string persona_badge(std::string_view persona) {
-    if (persona == kPersonaLinus)  return "🔥 Linus 模式 — 直击痛点，不留情面";
-    if (persona == kPersonaMentor) return "📚 Mentor 模式 — 讲清楚为什么，再说怎么改";
-    if (persona == kPersonaDevil)  return "😈 Devil 模式 — 专挑 edge case 与隐蔽 bug";
-    if (persona == kPersonaZen)    return "🌿 Zen 模式 — 先肯定，再建议";
-    return "⚖️ Default 模式 — 均衡资深 Reviewer";
+    if (persona == kPersonaLinus)  return "Linus 模式 — 直击痛点，不留情面";
+    if (persona == kPersonaMentor) return "Mentor 模式 — 讲清楚为什么，再说怎么改";
+    if (persona == kPersonaDevil)  return "Devil 模式 — 专挑 edge case 与隐蔽 bug";
+    if (persona == kPersonaZen)    return "Zen 模式 — 先肯定，再建议";
+    return "Default 模式 — 均衡资深审查者";
 }
 
 // ----- 公共结构约束（所有 persona 共用） -----

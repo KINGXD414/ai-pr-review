@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - New CLI flag `--kodo-viewer` lets users override the viewer base URL (default: `https://kingxd414.github.io/ai-pr-review/viewer.html`); empty string suppresses the `View` line.
 
 ### Changed
-- README: added a new "☁️ KODO 对象存储集成 (v0.3)" section documenting the workflow and the safety design.
+- README: added a new "KODO 对象存储集成" section documenting the workflow and the safety design.
 - README: documented the GitHub Pages viewer enablement flow (Settings -> Pages -> /docs branch).
 
 

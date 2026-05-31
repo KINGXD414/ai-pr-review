@@ -1,7 +1,7 @@
 # v0.2.0 评测矩阵 & Self-Reviewing Workflow 实证
 
-> 本文件是 AI PR Review 助手 **v0.2.0** 的演示档案，对应仓库 tag [`v0.2.0`](https://github.com/KINGXD414/ai-pr-review/releases/tag/v0.2.0)。
-> 评委可基于本文件还原所有数据；所有原始产物在 `code/eval/` 与 `demo/`。
+> 本文件是 AI PR Review 助手 v0.2.0 的演示档案，对应仓库 tag [`v0.2.0`](https://github.com/KINGXD414/ai-pr-review/releases/tag/v0.2.0)。
+> 评委可基于本文件还原所有数据；原始产物在 `code/eval/` 与 `demo/`。
 
 ---
 
@@ -10,12 +10,13 @@
 v0.2.0 相对 v0.1.0 的两件大事：
 
 1. **5 × 4 评测矩阵**：5 个真实 PR × 4 种 review 策略，给出"哪种策略在哪种 PR 上有用"的实证答案，而不是空谈"加 prompt 就更好"。
-2. **Self-Reviewing Workflow**：CI 上 `pr_review.yml` 用本项目自己 review 自己的 PR，并 sticky 原地更新评论，实现"工具吃自己狗粮"闭环。PR #26 全程留痕。
+2. **Self-Reviewing Workflow**：CI 上 `pr_review.yml` 用本项目自己 review 自己的 PR，并 sticky 原地更新评论，实现工具吃自己狗粮的闭环。PR #26 全程留痕。
 
-**结论先说**：
-- `persona-linus` 在 **high-complexity 大 PR**（500+ 行改动）上把命中率从 58~62% 拉到 **73~92%**（+15 ~ +30pp），是目前最值得默认开启的策略。
-- `self-critique` 在 **low-complexity 小 PR** 上会把已经命中的规则反复怀疑掉，得分倒退 -20pp，**不要全局开**。
-- `consensus-2`（双轮投票）没有显著增益，但耗时 ×3，**性价比最差**，v0.3 会下线。
+结论：
+
+- `persona-linus` 在 high-complexity 大 PR（500+ 行改动）上把命中率从 58~62% 拉到 73~92%（+15 ~ +30pp），是目前最值得默认开启的策略。
+- `self-critique` 在 low-complexity 小 PR 上会把已经命中的规则反复怀疑掉，得分倒退 -20pp，不要全局开。
+- `consensus-2`（双轮投票）没有显著增益，但耗时 ×3，性价比最差，v0.3 会下线。
 
 ---
 
@@ -36,27 +37,27 @@ v0.2.0 相对 v0.1.0 的两件大事：
 
 ---
 
-## 2. 四条关键洞察
+## 2. 四条关键发现
 
-### 洞察 1：`persona-linus` 在大 PR 上效果显著，小 PR 上反而拖后腿
-- High 复杂度（muduo-505 / spdlog-3594）平均提升 **+22.5pp**。
-- Low 复杂度（muduo-729）反而 **-20pp**——Linus 视角"挑刺"过度，把简单 PR 的非问题点也报成 bug。
-- **v0.3 计划**：按改动行数自动切策略（>300 行 LOC 走 persona，否则 baseline）。
+### 2.1 persona-linus 在大 PR 上效果显著，小 PR 上反而拖后腿
+- High 复杂度（muduo-505 / spdlog-3594）平均提升 +22.5pp。
+- Low 复杂度（muduo-729）反而 -20pp——Linus 视角挑刺过度，把简单 PR 的非问题点也报成 bug。
+- v0.3 计划：按改动行数自动切策略（>300 行 LOC 走 persona，否则 baseline）。
 
-### 洞察 2：`self-critique` 在小 PR 上灾难性回退
-- muduo-729 baseline 90% → critique 70%，倒退 **-20pp**。
+### 2.2 self-critique 在小 PR 上灾难性回退
+- muduo-729 baseline 90% → critique 70%，倒退 -20pp。
 - 原因：第二轮 critique 反复怀疑第一轮已命中的简单规则，导致 AI 改口"其实可能没问题"。
-- **v0.3 计划**：仅对置信度 <0.7 的命中触发 self-critique，不对全量触发。
+- v0.3 计划：仅对置信度 <0.7 的命中触发 self-critique，不对全量触发。
 
-### 洞察 3：`consensus-2` 零增益但 ×3 耗时
+### 2.3 consensus-2 零增益但 ×3 耗时
 - 平均得分与 baseline 持平（82% vs 82%），但耗时 23.4s vs 7.6s。
-- 原因：DeepSeek 同一温度下输出方差很小，"双轮投票"基本是两次相同输出。
-- **v0.3 计划**：下线 consensus-2，换成 `multi-temp`（不同温度跑两轮再投票）。
+- 原因：DeepSeek 同一温度下输出方差很小，双轮投票基本是两次相同输出。
+- v0.3 计划：下线 consensus-2，换成 multi-temp（不同温度跑两轮再投票）。
 
-### 洞察 4：medium 复杂度 PR 已经触顶
+### 2.4 medium 复杂度 PR 已经触顶
 - json-5187 / spdlog-3541 四策略全 100%。
-- 说明 baseline 在中等规模 PR 上已经做到了能做的极限。
-- **结论**：未来精力优先投到 high 复杂度场景。
+- baseline 在中等规模 PR 上已经做到了能做的极限。
+- 结论：未来精力优先投到 high 复杂度场景。
 
 ---
 
@@ -69,20 +70,20 @@ v0.2.0 相对 v0.1.0 的两件大事：
 | 02:14:22 | PR #26 首次 open，触发 workflow | sticky comment 首发 |
 | 02:21:00 | AI 评论指出 3 处可改进（异常处理 + 注释 + 命名） | comment id `4585452430` |
 | 02:21:38 | 作者 push commit `5cbcacc6b9`，针对 AI 建议修复 | — |
-| 02:23:01 | workflow 自动二次运行，sticky 评论**原地更新**为"已修复，无新增问题" | 同 comment id `4585452430` |
+| 02:23:01 | workflow 自动二次运行，sticky 评论原地更新为"已修复，无新增问题" | 同 comment id `4585452430` |
 
-> **关键**：sticky comment 没有刷屏（不是每次 push 都 new 一条），而是用 HTML 注释做幂等锚点，模拟了 Codecov / DangerJS 的成熟做法。
+sticky comment 没有刷屏（不是每次 push 都 new 一条），而是用 HTML 注释做幂等锚点，和 Codecov / DangerJS 的做法一致。
 
 PR #28（v0.2.0 release prep）同样跑了一次，AI 评"未发现明显风险" + 5 条文档润色建议，详情见 sticky [comment 4585503677](https://github.com/KINGXD414/ai-pr-review/pull/28#issuecomment-4585503677)。
 
 ---
 
-## 4. 故事卖点（给 Demo 视频用）
+## 4. Demo 讲述要点
 
-1. **"我们用自己的工具，review 我们自己的代码"**——`pr_review.yml` 全自动，无人工触发。
-2. **"原地更新，不刷屏"**——sticky comment 锚点幂等，工程化细节。
-3. **"基于实证选策略"**——不是拍脑袋说 persona 好，而是 5×4 矩阵说话；甚至给出反面案例（小 PR 不要用 persona）。
-4. **"性价比意识"**——consensus-2 零增益直接下线，不为了"看起来有 N 种 mode"而堆功能。
+1. "我们用自己的工具，review 我们自己的代码"——`pr_review.yml` 全自动，无人工触发。
+2. "原地更新，不刷屏"——sticky comment 锚点幂等。
+3. "基于实证选策略"——不是拍脑袋说 persona 好，而是 5×4 矩阵说话；甚至给出反面案例（小 PR 不要用 persona）。
+4. "性价比意识"——consensus-2 零增益直接下线，不为了看起来有多种 mode 而堆功能。
 
 ---
 
@@ -137,4 +138,4 @@ sha256sum ai-pr-review-v0.2.0.tar.gz   # 对比上面输出
 
 **版本**：v0.2.0
 **提交时间**：2026-05-31
-**作者**：[KINGXD414](https://github.com/KINGXD414) ＋ [love-June](https://github.com/love-June)
+**作者**：[KINGXD414](https://github.com/KINGXD414) + [love-June](https://github.com/love-June)

@@ -2,19 +2,29 @@
 
 > 七牛云×XEngineer暑期实训营 · 题目三
 
-## 🎬 Demo 视频
+## Demo 视频
 
-> [📺 B 站演示视频（10 分钟）](https://www.bilibili.com/video/TODO_REPLACE_BEFORE_DEADLINE)
+> [B 站演示视频（10 分钟）](https://www.bilibili.com/video/TODO_REPLACE_BEFORE_DEADLINE)
 
 实战剧本：muduo 真实 PR → AI 30 秒定位风险 → 修复 commit → AI Approve。
 
-> ⚠️ 视频链接将在 2026-05-31 23:00 前更新为最终录制版本。
+> 视频链接将在 2026-05-31 23:00 前更新为最终录制版本。
+
+## 项目亮点速览
+
+- **三层架构**：规则引擎（毫秒级 8 条规则）+ libclang AST 跨文件分析 + DeepSeek 大模型语义审查，每层职责清晰
+- **v0.2.0 三招**：人格化审查者 / Self-Critique 二审 / Consensus 多次投票，全部基于 prompt engineering，零额外依赖
+- **5 × 4 评测矩阵**：5 个真实开源 PR × 4 种策略 = 20 次 LLM 调用，给出"哪种策略在哪种 PR 上有用"的实证答案
+- **Self-Reviewing Workflow**：项目用自己的工具 review 自己的 PR，sticky comment 原地更新，PR #26 全程留痕
+- **三模式部署**：Docker 镜像（ghcr.io）/ GitHub Release 预编译二进制 + sha256 校验 / 源码三平台编译
+- **KODO 对象存储集成**：零 SDK、230 行 C++ 手写 HMAC-SHA1 签名 + URL-safe base64，scope 锁单 key 最小权限
+- **配套 viewer**：纯前端 marked.js 渲染，绕过七牛云强制下载，浏览器一键看渲染版
 
 ## 项目简介
 
-AI PR Review 是一个基于**规则引擎 + AST 分析 + LLM** 三层架构的 GitHub PR 智能审查工具。它自动拉取 PR 变更，逐层扫描风险模式，生成带风险等级和修复建议的结构化审查报告。
+AI PR Review 是一个基于**规则引擎 + AST 分析 + LLM** 三层架构的 GitHub PR 审查工具。自动拉取 PR 变更，逐层扫描风险模式，生成带风险等级和修复建议的结构化审查报告。
 
-**设计哲学：** 规则引擎秒级筛掉确定性问题，AST 提供跨文件上下文，LLM 只在需要语义理解时介入——避免对每个 PR 都发起 API 调用，兼顾速度与深度。
+规则引擎秒级筛掉确定性问题，AST 提供跨文件上下文，LLM 只在需要语义理解时介入——避免对每个 PR 都发起 API 调用，兼顾速度与深度。
 
 ## 架构设计
 
@@ -56,7 +66,7 @@ GitHub PR
 | AST Analyzer | 仓库源码（.h/.cpp） | --source-dir 指定本地路径，libclang 索引 |
 | LLM Gateway | diff + RuleHit + AstSummary | 组装 prompt，HTTP 调用 DeepSeek |
 
-**关键设计：** `Engine::run(const ParsedDiff& diff, const AstSummary* ast = nullptr)`——不传 AST 参数时退化为纯 regex 模式，传了则启用跨文件检查。这保证了规则引擎可以独立于 AST 运行，降低部署门槛。
+`Engine::run(const ParsedDiff& diff, const AstSummary* ast = nullptr)`——不传 AST 参数时退化为纯 regex 模式，传了则启用跨文件检查。规则引擎可以独立于 AST 运行，降低部署门槛。
 
 ## 功能特性
 
@@ -83,12 +93,12 @@ GitHub PR
 - 分析结果封装为 AstSummary，注入规则引擎和 LLM prompt
 
 ### LLM 网关（LLM Gateway）
-- **模型选择：DeepSeek-V3**——中文代码审查场景下表现优秀，API 成本远低于 GPT-4 级模型，适合实时交互场景
+- 模型：DeepSeek-V3——中文代码审查场景下表现稳定，API 成本远低于 GPT-4 级模型，适合实时交互
 - 可配置 prompt 模板，支持规则命中结果和 AST 上下文注入
 
 ### 评测框架（ai-pr-eval）
 
-独立可执行程序 `ai-pr-eval`，基于 JSON-driven 测试集自动化评测审查质量。设计见 [ADR-002](docs/adr/002-evaluation-framework.md)。
+独立可执行程序 `ai-pr-eval`，基于 JSON 测试集自动化评测审查质量。设计见 [ADR-002](docs/adr/002-evaluation-framework.md)。
 
 **三维加权评分**：
 
@@ -100,17 +110,17 @@ GitHub PR
 
 **评分公式**：`score = keyword_hit × 0.4 + severity_match × 0.3 + (1 - hallucination_rate) × 0.3`
 
-**评测集**：5 条真实 merged PR（2 高 2 中 1 低），来自 nlohmann/json、spdlog、muduo 三个开源项目，位于 `code/eval/cases.json`；候选 PR 的人工标注详见 `eval/dataset_v2.md`。
+**评测集**：5 条真实 merged PR（2 高 2 中 1 低），来自 nlohmann/json、spdlog、muduo 三个开源项目，位于 `code/eval/cases.json`；人工标注详见 `eval/dataset_v2.md`。
 
-**v0.2.0 实测**：完整 5 cases × 4 configs 评测矩阵已跑完，20 次 LLM 调用全部成功。4 配置综合分：baseline **82%** / persona-linus **87%** / self-critique **80%** / consensus-3 **82%**。高难度 case 上 persona-linus 平均提升 +22.5%（spdlog-3594 +30%），self-critique 在低难度被拖累 -2%，consensus-3 零增益但 3 倍开销。完整数据 + 诚实分析见 `code/eval/comparison_report.md`，v0.1.0 baseline 历史报告见 `code/eval/baseline_report.md`。
+**v0.2.0 实测**：5 cases × 4 configs 评测矩阵已跑完，20 次 LLM 调用全部成功。4 配置综合分：baseline **82%** / persona-linus **87%** / self-critique **80%** / consensus-3 **82%**。高难度 case 上 persona-linus 平均提升 +22.5%（spdlog-3594 +30%），self-critique 在低难度被拖累 -2%，consensus-3 零增益但 3 倍开销。完整数据见 `code/eval/comparison_report.md`，v0.1.0 baseline 报告见 `code/eval/baseline_report.md`。
 
-## 差异化特性 v0.2.0（三招）
+## v0.2.0 三招
 
-为应对现有产品（Codacy / SonarCloud / Copilot）的同质化输出，v0.2.0 引入三招 prompt engineering 创新，聚焦"审查质量本身"而非平台集成。设计动机详见 [ADR-001](docs/adr/001-differentiation-strategy.md)。
+为应对现有产品（Codacy / SonarCloud / Copilot）的同质化输出，v0.2.0 引入三招 prompt engineering，聚焦审查质量本身而非平台集成。设计动机见 [ADR-001](docs/adr/001-differentiation-strategy.md)。
 
-### 1. 人格化 Reviewer（`--persona`）
+### 1. 人格化审查者（`--persona`）
 
-提供 5 种 reviewer 人设，适配不同审查场景：
+5 种审查者人设，适配不同场景：
 
 | Persona | 风格 | 适用场景 |
 |---------|------|----------|
@@ -120,7 +130,7 @@ GitHub PR
 | `zen` | 鼓励式，先肯定再建议 | 实习生 / 首次贡献 |
 | `default`（不指定） | 均衡资深模式 | 通用场景 |
 
-**所有 persona 都内置"不要为了显得严厉而编造风险"的边界约束**，禁止人身攻击。
+所有 persona 内置"不要为了显得严厉而编造风险"的边界约束，禁止人身攻击。
 
 ```bash
 ./ai-pr-review --repo owner/repo --pr 123 --persona linus
@@ -146,6 +156,70 @@ GitHub PR
 ```
 
 > 三招互斥使用。v0.2.0 实测：persona-linus 综合 87%（最佳），baseline 82%，self-critique 80%，consensus-3 82%（零增益但 3x 开销）。完整 5×4 矩阵见 `code/eval/comparison_report.md`。
+
+
+
+## Self-Reviewing Workflow（吃自己狗粮）
+
+`.github/workflows/pr_review.yml` 在每次 PR `opened` / `synchronize` 时触发，调用本项目 review 自己的 diff，并把结果作为 sticky comment 发回 PR——HTML 注释 `<!-- ai-pr-review-bot -->` 作为幂等锚点，**同一 PR 永远只占一条评论，不刷屏**（参考 Codecov / DangerJS 做法）。
+
+实证案例 PR #26 全程留痕：
+
+| 时间（UTC+8） | 事件 | Artifact |
+|---|---|---|
+| 02:14:22 | PR open，workflow 首次触发 | sticky comment 首发 |
+| 02:21:00 | AI 评论指出 3 处可改进（异常处理 + 注释 + 命名） | comment id `4585452430` |
+| 02:21:38 | 作者 push commit `5cbcacc6b9` 修复 | — |
+| 02:23:01 | workflow 自动二跑，sticky 评论**原地更新**为"已修复" | 同 comment id |
+
+PR #28（v0.2.0 release prep）同样跑过一次，AI 给出 5 条文档润色建议，详情见 [comment 4585503677](https://github.com/KINGXD414/ai-pr-review/pull/28#issuecomment-4585503677)。
+
+## 工程化基建
+
+### GitHub Actions（双 workflow）
+
+| Workflow | 触发 | 产物 |
+|---|---|---|
+| `pr_review.yml` | PR opened / synchronize | sticky comment AI review |
+| `release.yml` | push tag `v*` | Linux x64 binary tar.gz + sha256 + Docker image @ ghcr.io |
+
+### Release 产物校验
+
+`v0.2.0` Release 同时发布二进制 + sha256 校验文件，确保下载完整性：
+
+```bash
+curl -L -o ai-pr-review-v0.2.0.tar.gz \
+  https://github.com/KINGXD414/ai-pr-review/releases/download/v0.2.0/ai-pr-review-v0.2.0-linux-x64.tar.gz
+curl -L https://github.com/KINGXD414/ai-pr-review/releases/download/v0.2.0/ai-pr-review-v0.2.0-linux-x64.tar.gz.sha256
+sha256sum ai-pr-review-v0.2.0.tar.gz   # 比对两者
+```
+
+### 容器化部署
+
+`Dockerfile` 多阶段构建，runtime 镜像约 600MB（libclang runtime 占大头）；CI 自动推送到 `ghcr.io/kingxd414/ai-pr-review:v0.2.0` 与 `:latest`。
+
+### v0.2.0 评测矩阵全数据
+
+5 cases × 4 configs = 20 次 LLM 调用，全部成功：
+
+| Case | 难度 | baseline | persona-linus | self-critique | consensus-3 |
+|---|---|---|---|---|---|
+| json-5187 | medium | 100% | 100% | 100% | 100% |
+| spdlog-3541 | medium | 100% | 100% | 100% | 100% |
+| muduo-729 | low | 90% | 70% ↓ | 70% ↓ | 90% |
+| muduo-505 | high | 58% | 73% ↑ | 71% ↑ | 58% |
+| spdlog-3594 | high | 62% | **92%** ↑↑ | 62% | 62% |
+| **加权平均** | — | **82%** | **87%** | 80% | 82% |
+| **平均耗时** | — | 7.6 s | 8.6 s | 12.2 s | 23.4 s |
+
+四条关键发现：
+
+1. **persona-linus 是 high 难度的杀手**（spdlog-3594 +30%, muduo-505 +15%），但在 low 难度上过度严厉反而降分（muduo-729 -20%）
+2. **self-critique 平均 -2%**，被 low case 拖累；high case 上仍有 +13% 提升
+3. **consensus-3 零增益但耗时 3x**——DeepSeek 同温度下输出方差小，"投票"基本是相同输出
+4. **medium 难度撞顶**——评测集 medium case 关键词覆盖面太宽，未来需收紧
+
+完整原始数据 + 反思分析见 [`code/eval/comparison_report.md`](code/eval/comparison_report.md) 与 [`demo/v020_evaluation_matrix.md`](demo/v020_evaluation_matrix.md)。
 
 ## 构建与运行
 
@@ -224,7 +298,7 @@ export DEEPSEEK_API_KEY=your_api_key
 # 启用 AST 分析
 ./ai-pr-review --repo owner/repo --pr 123 --source-dir /path/to/repo
 
-# v0.2.0 差异化三招（详见 docs/adr/001-differentiation-strategy.md）
+# v0.2.0 三招（详见 docs/adr/001-differentiation-strategy.md）
 # Linus 人设审查（严厉直接）
 ./ai-pr-review --repo owner/repo --pr 123 --persona linus
 
@@ -274,10 +348,11 @@ ai-pr-review/
 │   │   ├── github/             # GitHub API 客户端
 │   │   ├── gateway/            # LLM 网关（DeepSeek）
 │   │   ├── prompt/             # v0.2.0 三招 prompt 模板
-│   │   │   ├── personas.h      # 5 种 reviewer 人设
+│   │   │   ├── personas.h      # 5 种审查者人设
 │   │   │   ├── self_critique.h # 二审反思 prompt
 │   │   │   └── consensus.h     # 多次投票 meta-review prompt
-│   │   └── eval/               # 评测程序核心代码（runner.cpp / runner.h）
+│   │   ├── eval/               # 评测程序核心代码（runner.cpp / runner.h）
+│   │   └── storage/            # KODO 上传客户端（kodo_client.h/.cpp）
 │   ├── eval/                   # 评测数据与实测产出
 │   │   ├── cases.json          # 评测集（5 条标注 PR，dataset_v2 子集）
 │   │   ├── baseline_report.md  # v0.1.0 baseline 实测报告（综合 85%）
@@ -290,10 +365,12 @@ ai-pr-review/
 ├── docs/
 │   ├── DAILY.md                # 每日进度日志
 │   ├── CHANGELOG.md            # 版本变更记录（Keep a Changelog）
+│   ├── viewer.html             # 纯前端 Markdown 渲染器（GitHub Pages 托管）
 │   ├── adr/                    # 架构决策记录
 │   │   ├── 001-differentiation-strategy.md  # 三招方向选择
-│   │   └── 002-evaluation-framework.md      # 评测体系设计
-│   └── kodo-prestudy.md        # 七牛云 KODO 集成预研（未来扩展）
+│   │   ├── 002-evaluation-framework.md      # 评测体系设计
+│   │   └── 003-rulehit-format.md            # RuleHit 输出格式与 Engine 接口
+│   └── kodo-prestudy.md        # 七牛云 KODO 集成预研
 ├── demo/                       # 真实开源 PR demo 输出
 │   ├── muduo_pr705_review.md
 │   └── muduo_pr729_review.md
@@ -314,61 +391,17 @@ ai-pr-review/
 | 异常安全 | 异常路径内存泄漏检测 |
 | 过度优化识别 | 判断优化收益与风险 |
 
-**难度分布：** 🔴 高 ×2 / 🟡 中 ×2 / 🟢 低 ×1
+**难度分布**：高 ×2 / 中 ×2 / 低 ×1
 
-## 原创代码说明
+## KODO 对象存储集成
 
-本项目在 72 小时内完成，以下为各成员原创贡献：
+`ai-pr-review` 可以在生成审查报告后，自动把 Markdown 报告上传到七牛云 KODO，得到一个公网 URL，评委/队友点链接即看。
 
-### love-June（规则引擎 + 评测集 + 项目文档）
-- `code/src/rules/`：RuleHit 结构体、Engine::run 接口、8 条规则的完整实现
-- `code/tests/test_rule_engine.cpp`：GTest 单元测试用例
-- `eval/cases.json` + `eval/dataset_v2.md`：5 条真实 PR 评测集
-- `docs/adr/001-differentiation-strategy.md`：差异化方向 ADR
-- `docs/adr/002-evaluation-framework.md`：评测体系 ADR
-- `docs/DAILY.md`：每日进度日志
-- `docs/CHANGELOG.md`：版本变更记录
-- `docs/kodo-prestudy.md`：七牛云 KODO 集成预研
-- `README.md`：本文件
-
-### KINGXD414（AST 分析 + 主 Pipeline + 评测框架 + v0.2.0 三招）
-- `code/src/analyzer/`：基于 libclang 的 AST 分析器（含 9 项单元测试）
-- `code/src/diff/` + `code/src/github/` + `code/src/gateway/`：Diff 解析、GitHub API 客户端、DeepSeek LLM 网关
-- `code/src/main.cpp`：CLI Pipeline 编排，支持 `--source-dir` / `--persona` / `--self-critique` / `--consensus`
-- `code/src/prompt/`：v0.2.0 三招 prompt 模板（personas / self-critique / consensus）
-- `code/src/eval/` + `eval_main.cpp`：评测程序 `ai-pr-eval` 三维度评分实现
-- `code/CMakeLists.txt`：FetchContent + apt 双管依赖构建配置
-- `demo/muduo_pr705_review.md` + `demo/muduo_pr729_review.md`：真实 PR demo 输出
-
-## 未来扩展
-
-- **增量 AST 缓存：** 对大型仓库，缓存上次 AST 索引，仅重新解析变更文件
-- **多模型支持：** 支持 OpenAI / Claude 等模型切换
-- **GitHub App 集成：** 从 CLI 工具升级为 GitHub App，PR 提交自动触发审查
-- **VSCode Extension：** 开发者提交 PR 后侧边栏实时展示审查结果
-- **规则自定义：** 支持用户通过配置文件定义项目特定规则
-- **规则引擎主集成：** 当前规则引擎为独立模块（`code/src/rules/`），未来集成至主 Pipeline 第一层，正则秒级筛掉确定性问题
-- **真 SSE 流式输出：** 当前 DeepSeek 调用为同步阻塞，未来切换至 SSE 流式输出，提升大型 PR 审查的交互体验
-- **更多规则：** 迭代器失效检测（`iterator_invalidation`）、线程安全规则（共享变量无锁保护）、资源泄漏规则（RAII 覆盖检测）
-- **扩展评测集：** cases.json 从 5 条扩至 10-15 条，覆盖更多语言特性和 bug 模式
-
-## 团队
-
-| 成员 | GitHub | 职责 |
-|------|--------|------|
-| love-June | [@love-June](https://github.com/love-June) | 规则引擎 + 评测集 + 项目文档 |
-| KINGXD414 | [@KINGXD414](https://github.com/KINGXD414) | AST 分析器 + 主 Pipeline + CMake + 评测框架 + v0.2.0 三招 |
-
-
-## ☁️ KODO 对象存储集成（v0.3）
-
-`ai-pr-review` 可以在生成 review 报告后，**自动把 Markdown 报告上传到七牛云 KODO**，得到一个稳定的公网 URL —— 评委 / 队友点链接即看，不必 clone 仓库或本地构建。
-
-> 实现走的是「最小依赖」路线：直接复用项目已有的 cpp-httplib + OpenSSL HMAC-SHA1 + nlohmann/json 手写上传 token，**没有引入任何 Qiniu SDK**。代码集中在 `code/src/storage/kodo_client.{h,cpp}`，约 230 行。
+实现走最小依赖路线：复用项目已有的 cpp-httplib + OpenSSL HMAC-SHA1 + nlohmann/json 手写上传 token，没有引入任何七牛云 SDK。代码集中在 `code/src/storage/kodo_client.{h,cpp}`，约 230 行。
 
 ### 配置
 
-通过环境变量提供凭证（**绝不写入仓库**）：
+通过环境变量提供凭证（绝不写入仓库）：
 
 | 变量名 | 说明 |
 |---|---|
@@ -396,13 +429,13 @@ ai-pr-review --pr https://github.com/owner/repo/pull/123 \
 
 ### 安全设计
 
-- **scope 锁到单个 key**：上传 token 的 `PutPolicy.scope` 写成 `bucket:key` 而不是 `bucket`，即使 token 在 demo 中被截屏泄露，攻击者也只能覆盖**这一个 key**，不能往 bucket 里塞任意垃圾。
+- **scope 锁到单个 key**：上传 token 的 `PutPolicy.scope` 写成 `bucket:key` 而不是 `bucket`，即使 token 泄露，攻击者也只能覆盖这一个 key，不能往 bucket 里塞任意文件。
 - **deadline 默认 1h**：token 过期即作废。
 - **凭证只读环境变量**：CI 走 GitHub repo secret，本地走 shell env，二进制和 git 历史里都不留痕。
 
-### 🌐 在线渲染查看（GitHub Pages viewer）
+### 在线渲染查看（GitHub Pages viewer）
 
-七牛云默认测试域名 `*.clouddn.com` 对所有文件强制 `Content-Disposition: attachment`，浏览器直接访问 KODO URL 会触发下载而不是渲染。为此项目内置了一个**纯前端 viewer**（`docs/viewer.html`），通过 GitHub Pages 托管，把 KODO URL 作为 query 参数拉取并用 [marked.js](https://marked.js.org/) 渲染成漂亮的 GitHub 风格页面，**无需服务端、无需自定义域名**。
+七牛云默认测试域名 `*.clouddn.com` 对所有文件强制 `Content-Disposition: attachment`，浏览器直接访问 KODO URL 会触发下载而不是渲染。项目内置了一个纯前端 viewer（`docs/viewer.html`），通过 GitHub Pages 托管，把 KODO URL 作为 query 参数拉取并用 [marked.js](https://marked.js.org/) 渲染成 GitHub 风格页面，无需服务端、无需自定义域名。
 
 #### 工作原理
 
@@ -413,15 +446,11 @@ ai-pr-review --pr https://github.com/owner/repo/pull/123 \
                               └──────────────────┘                  └──────────┘
 ```
 
-KODO 响应头里的 `Access-Control-Allow-Origin: *` 是关键 —— viewer 才能跨域拉取原始 markdown。
-
-#### 启用步骤（一次性）
-
-仓库 Owner 在 **Settings → Pages** 把 `Source` 设为 `Deploy from a branch` / `Branch: main` / `Folder: /docs` → Save。等 1-2 分钟，viewer 就上线在 `https://<user>.github.io/<repo>/viewer.html`。
+KODO 响应头里的 `Access-Control-Allow-Origin: *` 是关键——viewer 才能跨域拉取原始 markdown。
 
 #### CLI 输出
 
-启用 `--upload-kodo` 后，终端 `=== KODO UPLOAD ===` 块除了 `URL` 行（raw markdown，会下载），还会多一行 `View` —— 这就是 viewer 链接，浏览器粘贴直接看渲染版：
+启用 `--upload-kodo` 后，终端 `=== KODO UPLOAD ===` 块除了 `URL` 行（raw markdown，会下载），还会多一行 `View`——这是 viewer 链接：
 
 ```
 === KODO UPLOAD ===
@@ -435,30 +464,22 @@ View   : https://<user>.github.io/ai-pr-review/viewer.html?url=http%3A%2F%2F<dom
 
 #### 自定义 viewer 地址
 
-如果你 fork 了仓库或想换 viewer 主机，用 `--kodo-viewer` 覆盖默认值；传空字符串则不输出 `View` 行：
+fork 仓库或想换 viewer 主机，用 `--kodo-viewer` 覆盖默认值；传空字符串则不输出 `View` 行：
 
 ```bash
 ai-pr-review --pr <url> --upload-kodo \
              --kodo-viewer "https://my-domain.com/viewer.html"
 ```
 
-## License
+## 部署
 
-MIT
+项目原生跨平台（C++17 + CMake + FetchContent 拉取头文件依赖），在 Ubuntu 22.04 上 CI 通过。下面三种部署方式按上手成本排序。
 
----
-
-## 🚀 部署 / Cross-Platform Usage
-
-> 项目原生跨平台（C++17 + CMake + FetchContent 拉取头文件依赖），实测在 Ubuntu 22.04 上 CI 通过。下面给出三种"装到哪都能跑"的姿势，按上手成本排序。
-
----
-
-### 方式 A：Docker（推荐 — 任意平台一行命令）
+### 方式 A：Docker（推荐）
 
 适用于 Linux / macOS / Windows（WSL2 或 Docker Desktop）。
 
-**从 GitHub Container Registry 拉镜像**（`v0.2.0` 已自动构建并发布，仓库公开后可直接拉取）：
+**从 GitHub Container Registry 拉镜像**（v0.2.0 已自动构建并发布，仓库公开后可直接拉取）：
 
 ```bash
 docker pull ghcr.io/kingxd414/ai-pr-review:latest
@@ -482,8 +503,6 @@ docker build -t ai-pr-review:dev .
 docker run --rm ai-pr-review:dev --help
 ```
 
----
-
 ### 方式 B：GitHub Release 下载预编译二进制（Linux x86_64）
 
 ```bash
@@ -496,9 +515,7 @@ cd ai-pr-review-v0.2.0-linux-x64
 ./ai-pr-review --version
 ```
 
-适合不想编译、只想试跑的 reviewer。
-
----
+适合不想编译、只想试跑的人。
 
 ### 方式 C：源码编译（三平台通用）
 
@@ -539,9 +556,7 @@ cmake -B build -S code -DCMAKE_BUILD_TYPE=Release `
 cmake --build build --config Release
 ```
 
-> ⚠️ 本项目 72h 开发周期内只在 Ubuntu 22.04 完整 CI 验证。macOS / Windows 编译路径基于 CMake 跨平台特性设计，欢迎 issue / PR 报告平台问题。
-
----
+> 本项目 72h 开发周期内只在 Ubuntu 22.04 完整 CI 验证。macOS / Windows 编译路径基于 CMake 跨平台特性设计，欢迎 issue / PR 报告平台问题。
 
 ### 凭证准备
 
@@ -556,3 +571,51 @@ cmake --build build --config Release
 export DEEPSEEK_API_KEY="sk-xxxxxxxx"
 export GITHUB_TOKEN="ghp_xxxxxxxx"
 ```
+
+## 原创代码说明
+
+本项目在 72 小时内完成，以下为各成员原创贡献：
+
+### love-June（规则引擎 + 评测集 + 项目文档）
+- `code/src/rules/`：RuleHit 结构体、Engine::run 接口、8 条规则的完整实现
+- `code/tests/test_rule_engine.cpp`：GTest 单元测试用例
+- `eval/cases.json` + `eval/dataset_v2.md`：5 条真实 PR 评测集
+- `docs/adr/001-differentiation-strategy.md`：差异化方向 ADR
+- `docs/adr/002-evaluation-framework.md`：评测体系 ADR
+- `docs/DAILY.md`：每日进度日志
+- `docs/CHANGELOG.md`：版本变更记录
+- `docs/kodo-prestudy.md`：七牛云 KODO 集成预研
+- `README.md`：本文件
+
+### KINGXD414（AST 分析 + 主 Pipeline + 评测框架 + v0.2.0 三招）
+- `code/src/analyzer/`：基于 libclang 的 AST 分析器（含 9 项单元测试）
+- `code/src/diff/` + `code/src/github/` + `code/src/gateway/`：Diff 解析、GitHub API 客户端、DeepSeek LLM 网关
+- `code/src/main.cpp`：CLI Pipeline 编排，支持 `--source-dir` / `--persona` / `--self-critique` / `--consensus`
+- `code/src/prompt/`：v0.2.0 三招 prompt 模板（personas / self-critique / consensus）
+- `code/src/eval/` + `eval_main.cpp`：评测程序 `ai-pr-eval` 三维度评分实现
+- `code/src/storage/`：KODO 上传客户端（零 SDK，手写 HMAC-SHA1 签名）
+- `code/CMakeLists.txt`：FetchContent + apt 双管依赖构建配置
+- `demo/muduo_pr705_review.md` + `demo/muduo_pr729_review.md`：真实 PR demo 输出
+
+## 未来扩展
+
+- 增量 AST 缓存：对大型仓库，缓存上次 AST 索引，仅重新解析变更文件
+- 多模型支持：OpenAI / Claude 等模型切换
+- GitHub App 集成：从 CLI 工具升级为 GitHub App，PR 提交自动触发审查
+- VSCode Extension：开发者提交 PR 后侧边栏实时展示审查结果
+- 规则自定义：配置文件定义项目特定规则
+- 规则引擎主集成：当前规则引擎为独立模块（`code/src/rules/`），未来集成至主 Pipeline 第一层
+- SSE 流式输出：当前 DeepSeek 调用为同步阻塞，未来切换至 SSE 流式输出
+- 更多规则：迭代器失效检测、线程安全规则、资源泄漏规则
+- 扩展评测集：cases.json 从 5 条扩至 10-15 条
+
+## 团队
+
+| 成员 | GitHub | 职责 |
+|------|--------|------|
+| love-June | [@love-June](https://github.com/love-June) | 规则引擎 + 评测集 + 项目文档 |
+| KINGXD414 | [@KINGXD414](https://github.com/KINGXD414) | AST 分析器 + 主 Pipeline + CMake + 评测框架 + v0.2.0 三招 |
+
+## License
+
+MIT
