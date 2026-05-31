@@ -18,12 +18,14 @@
 #include "prompt/personas.h"
 #include "prompt/consensus.h"
 #include "prompt/self_critique.h"
+#include "storage/kodo_client.h"
 
 #include <CLI/CLI.hpp>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -205,6 +207,8 @@ int main(int argc, char** argv) {
     bool verbose    = false;
     int consensus_n = 1;
     bool self_critique = false;
+    bool upload_kodo = false;
+    std::string kodo_prefix = "reviews";
 
     app.add_option("--pr", pr_url,
         "GitHub PR URL, e.g. https://github.com/owner/repo/pull/123")
@@ -236,6 +240,10 @@ int main(int argc, char** argv) {
         ->check(CLI::Range(1, 5));
     app.add_flag("--self-critique", self_critique,
         "Enable two-pass review: generate -> self-audit -> refined report");
+    app.add_flag("--upload-kodo", upload_kodo,
+        "Upload the rendered report to Qiniu KODO (needs env QINIU_AK/SK/BUCKET)");
+    app.add_option("--kodo-prefix", kodo_prefix,
+        "Key prefix used inside the KODO bucket (default: reviews)");
     app.add_flag("-v,--verbose", verbose,
         "Enable debug logs");
 
@@ -435,6 +443,46 @@ int main(int argc, char** argv) {
     std::cout << "\n=== REPORT PREVIEW (first 1200 chars) ===\n"
               << report.substr(0, std::min<std::size_t>(report.size(), 1200))
               << "\n=== END PREVIEW ===\n";
+
+    // ----- Optional: upload to Qiniu KODO -----
+    if (upload_kodo) {
+        if (!aipr::storage::KodoClient::env_ready()) {
+            spdlog::error("--upload-kodo set, but QINIU_AK / QINIU_SK / QINIU_BUCKET "
+                          "not all present in env -- skipping upload");
+        } else {
+            const auto cfg = aipr::storage::KodoClient::from_env();
+            aipr::storage::KodoClient kc(cfg);
+
+            // key = <prefix>/<owner>-<repo>-PR<n>-<UTC timestamp>.md
+            const std::time_t now_t = std::time(nullptr);
+            std::tm tm{};
+            gmtime_r(&now_t, &tm);
+            char ts[32] = {0};
+            std::strftime(ts, sizeof(ts), "%Y%m%d-%H%M%S", &tm);
+
+            std::ostringstream key_oss;
+            key_oss << kodo_prefix << "/" << pr->locator.owner << "-"
+                    << pr->locator.repo << "-PR" << pr->locator.number
+                    << "-" << ts << ".md";
+            const std::string key = key_oss.str();
+
+            spdlog::info("KODO: uploading report to bucket='{}' key='{}'",
+                         cfg.bucket, key);
+            const auto kr = kc.upload(key, report);
+            if (kr.ok) {
+                std::cout << "\n=== KODO UPLOAD ===\n"
+                          << "Bucket : " << cfg.bucket << "\n"
+                          << "Key    : " << kr.key    << "\n"
+                          << "Hash   : " << kr.hash   << "\n";
+                if (!kr.url.empty()) {
+                    std::cout << "URL    : " << kr.url << "\n";
+                }
+                std::cout << "=== END KODO UPLOAD ===\n";
+            } else {
+                spdlog::error("KODO upload failed: {}", kr.error);
+            }
+        }
+    }
 
     return resp.ok ? 0 : 5;
 }

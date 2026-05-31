@@ -122,6 +122,7 @@ add_library(ai_pr_review_core STATIC
     src/analyzer/ast_analyzer.cpp
     src/rules/engine.cpp
     src/eval/runner.cpp
+    src/storage/kodo_client.cpp
 )
 
 target_include_directories(ai_pr_review_core PUBLIC
