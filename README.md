@@ -4,7 +4,7 @@
 
 ## Demo 视频 & 在线演示
 
-> [B 站演示视频](https://www.bilibili.com/video/TODO_REPLACE_BEFORE_DEADLINE) · [🌐 在线交互式演示](https://kingxd414.github.io/ai-pr-review/)（GitHub Pages，2026-06-01 00:00 仓库公开后生效）
+> [B 站演示视频]((https://b23.tv/N6oNxpK)) · [🌐 在线交互式演示](https://kingxd414.github.io/ai-pr-review/)（GitHub Pages，2026-06-01 00:00 仓库公开后生效）
 
 **两种体验方式**：
 
