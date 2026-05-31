@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Qiniu KODO object-storage integration (`code/src/storage/kodo_client.{h,cpp}`).
+  - New CLI flag `--upload-kodo` uploads the rendered Markdown report after generation.
+  - Hand-rolled upload-token signing (PutPolicy + HMAC-SHA1 + URL-safe base64); no Qiniu SDK dependency.
+  - `PutPolicy.scope` is pinned to `bucket:key` so a leaked demo token can only overwrite the same key.
+  - Credentials read from env `QINIU_AK` / `QINIU_SK` / `QINIU_BUCKET` / `QINIU_REGION` / `QINIU_DOMAIN`.
+
+### Changed
+- README: added a new "☁️ KODO 对象存储集成 (v0.3)" section documenting the workflow and the safety design.
+
+
 See [Issue #27](https://github.com/KINGXD414/ai-pr-review/issues/27) for v0.3 backlog.
 
 ## [0.2.0] - 2026-05-31

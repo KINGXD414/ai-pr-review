@@ -359,6 +359,47 @@ ai-pr-review/
 | love-June | [@love-June](https://github.com/love-June) | 规则引擎 + 评测集 + 项目文档 |
 | KINGXD414 | [@KINGXD414](https://github.com/KINGXD414) | AST 分析器 + 主 Pipeline + CMake + 评测框架 + v0.2.0 三招 |
 
+
+## ☁️ KODO 对象存储集成（v0.3）
+
+`ai-pr-review` 可以在生成 review 报告后，**自动把 Markdown 报告上传到七牛云 KODO**，得到一个稳定的公网 URL —— 评委 / 队友点链接即看，不必 clone 仓库或本地构建。
+
+> 实现走的是「最小依赖」路线：直接复用项目已有的 cpp-httplib + OpenSSL HMAC-SHA1 + nlohmann/json 手写上传 token，**没有引入任何 Qiniu SDK**。代码集中在 `code/src/storage/kodo_client.{h,cpp}`，约 230 行。
+
+### 配置
+
+通过环境变量提供凭证（**绝不写入仓库**）：
+
+| 变量名 | 说明 |
+|---|---|
+| `QINIU_AK` | AccessKey |
+| `QINIU_SK` | SecretKey |
+| `QINIU_BUCKET` | bucket 名 |
+| `QINIU_REGION` | 区域 id，默认 `z0`（华东-浙江） |
+| `QINIU_DOMAIN` | 公网外链域名（可选；不填则不返回 URL） |
+
+### 使用
+
+```bash
+export QINIU_AK=...
+export QINIU_SK=...
+export QINIU_BUCKET=ai-pr-review-demo
+export QINIU_REGION=z0
+export QINIU_DOMAIN=tfvs8e8zx.hd-bkt.clouddn.com
+
+ai-pr-review --pr https://github.com/owner/repo/pull/123 \
+             --output review.md \
+             --upload-kodo
+```
+
+输出会多一段 `=== KODO UPLOAD ===` 块，包含 bucket / key / hash / URL。
+
+### 安全设计
+
+- **scope 锁到单个 key**：上传 token 的 `PutPolicy.scope` 写成 `bucket:key` 而不是 `bucket`，即使 token 在 demo 中被截屏泄露，攻击者也只能覆盖**这一个 key**，不能往 bucket 里塞任意垃圾。
+- **deadline 默认 1h**：token 过期即作废。
+- **凭证只读环境变量**：CI 走 GitHub repo secret，本地走 shell env，二进制和 git 历史里都不留痕。
+
 ## License
 
 MIT
