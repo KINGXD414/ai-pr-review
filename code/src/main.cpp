@@ -209,6 +209,7 @@ int main(int argc, char** argv) {
     bool self_critique = false;
     bool upload_kodo = false;
     std::string kodo_prefix = "reviews";
+    std::string kodo_viewer_base = "https://kingxd414.github.io/ai-pr-review/viewer.html";
 
     app.add_option("--pr", pr_url,
         "GitHub PR URL, e.g. https://github.com/owner/repo/pull/123")
@@ -244,6 +245,8 @@ int main(int argc, char** argv) {
         "Upload the rendered report to Qiniu KODO (needs env QINIU_AK/SK/BUCKET)");
     app.add_option("--kodo-prefix", kodo_prefix,
         "Key prefix used inside the KODO bucket (default: reviews)");
+    app.add_option("--kodo-viewer", kodo_viewer_base,
+        "Base URL of the markdown viewer (GitHub Pages) for rendering uploaded reports;\n set empty to suppress the View URL line");
     app.add_flag("-v,--verbose", verbose,
         "Enable debug logs");
 
@@ -476,6 +479,25 @@ int main(int argc, char** argv) {
                           << "Hash   : " << kr.hash   << "\n";
                 if (!kr.url.empty()) {
                     std::cout << "URL    : " << kr.url << "\n";
+                    // View URL = viewer base + ?url=<encoded raw url>
+                    if (!kodo_viewer_base.empty()) {
+                        auto url_encode = [](const std::string& s) {
+                            std::ostringstream o;
+                            o << std::hex << std::uppercase << std::setfill('0');
+                            for (unsigned char c : s) {
+                                if (std::isalnum(c) || c == '-' || c == '_' ||
+                                    c == '.' || c == '~') {
+                                    o << static_cast<char>(c);
+                                } else {
+                                    o << '%' << std::setw(2)
+                                      << static_cast<int>(c);
+                                }
+                            }
+                            return o.str();
+                        };
+                        std::cout << "View   : " << kodo_viewer_base
+                                  << "?url=" << url_encode(kr.url) << "\n";
+                    }
                 }
                 std::cout << "=== END KODO UPLOAD ===\n";
             } else {
