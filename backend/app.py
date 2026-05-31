@@ -19,7 +19,10 @@ from collections import defaultdict, deque
 # ── 配置 ──
 BIN_PATH = os.environ.get(
     "AI_PR_REVIEW_BIN",
-    os.path.expanduser("~/demo/ai-pr-review-v0.2.0-linux-x64/ai-pr-review"),
+    os.environ.get(
+        "BIN_PATH",
+        os.path.expanduser("~/demo/ai-pr-review-v0.2.0-linux-x64/ai-pr-review"),
+    ),
 )
 WHITELIST_REPOS = {
     "chenshuo/muduo",
