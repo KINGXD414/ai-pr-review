@@ -4,18 +4,18 @@
 
 ## Demo 视频 & 在线演示
 
-> [B 站演示视频（10 分钟）](https://www.bilibili.com/video/TODO_REPLACE_BEFORE_DEADLINE) · [🌐 在线交互式演示](https://kingxd414.github.io/ai-pr-review/)
+> [B 站演示视频](https://www.bilibili.com/video/TODO_REPLACE_BEFORE_DEADLINE) · [🌐 在线交互式演示](https://kingxd414.github.io/ai-pr-review/)（GitHub Pages，2026-06-01 00:00 仓库公开后生效）
 
 **两种体验方式**：
 
-- **B 站视频**：10 分钟完整剧本演示，含自审 demo + 5×4 评测矩阵 + 工程化决策
-- **在线演示页**（GitHub Pages）：输入 GitHub PR URL → 实时跑 AI 审查 → 渲染 Markdown 报告
-  - 4 种审查模式可切换：Baseline / Persona·Linus / Self-Critique / Consensus 3
-  - 8 份预生成报告即时返回（muduo PR #729 / #505、nlohmann/json #5187、自审 PR #26）
-  - 在线审查白名单：muduo / json / spdlog / fmt / abseil / 本项目（防 API 滥用）
-  - 后端开窗期间可输任意白名单 PR 实时审查
+- **B 站视频**：完整剧本演示，含 OOM 钩子开场 + 4 种审查模式对比 + 真在线 review demo + 5×4 评测矩阵与工程化决策 + 自审 PR 演示
+- **在线演示页**（GitHub Pages，2026-06-01 00:00 仓库公开后生效）：
+  - **8 份预生成报告即时切换查看**（muduo PR #729 / #505、nlohmann/json #5187、自审 PR #26 等）——纯前端无后端依赖，clone 后开 Pages 即用
+  - **4 种审查模式可对比**：Baseline / Persona·Linus / Self-Critique / Consensus 3
+  - **真在线 AI 审查**（输入 PR URL → 实时跑 → 渲染 Markdown）需要后端服务，作者本地后端开启期间可用；白名单 repo：muduo / json / spdlog / fmt / abseil / 本项目（防 DeepSeek API key 被刷）
+  - 想自己跑真在线审查：clone 后按 [`backend/README.md`](backend/README.md) 起本地 backend，再把 `docs/config.js` 里 `API_BASE` 指向自己后端地址即可
 
-> 视频链接将在 2026-05-31 23:00 前更新为最终录制版本。
+> 视频链接将在录制上传完成后更新到上方占位。
 
 ## 项目亮点速览
 
