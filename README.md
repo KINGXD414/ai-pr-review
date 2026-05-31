@@ -400,6 +400,48 @@ ai-pr-review --pr https://github.com/owner/repo/pull/123 \
 - **deadline 默认 1h**：token 过期即作废。
 - **凭证只读环境变量**：CI 走 GitHub repo secret，本地走 shell env，二进制和 git 历史里都不留痕。
 
+### 🌐 在线渲染查看（GitHub Pages viewer）
+
+七牛云默认测试域名 `*.clouddn.com` 对所有文件强制 `Content-Disposition: attachment`，浏览器直接访问 KODO URL 会触发下载而不是渲染。为此项目内置了一个**纯前端 viewer**（`docs/viewer.html`），通过 GitHub Pages 托管，把 KODO URL 作为 query 参数拉取并用 [marked.js](https://marked.js.org/) 渲染成漂亮的 GitHub 风格页面，**无需服务端、无需自定义域名**。
+
+#### 工作原理
+
+```
+┌───────────┐   ?url=<KODO>   ┌──────────────────┐  fetch (CORS *)  ┌──────────┐
+│  浏览器   │ ──────────────► │ Pages viewer.html│ ───────────────► │ KODO .md │
+└───────────┘                 │ marked.js 渲染    │  ◄───────────────│  raw md  │
+                              └──────────────────┘                  └──────────┘
+```
+
+KODO 响应头里的 `Access-Control-Allow-Origin: *` 是关键 —— viewer 才能跨域拉取原始 markdown。
+
+#### 启用步骤（一次性）
+
+仓库 Owner 在 **Settings → Pages** 把 `Source` 设为 `Deploy from a branch` / `Branch: main` / `Folder: /docs` → Save。等 1-2 分钟，viewer 就上线在 `https://<user>.github.io/<repo>/viewer.html`。
+
+#### CLI 输出
+
+启用 `--upload-kodo` 后，终端 `=== KODO UPLOAD ===` 块除了 `URL` 行（raw markdown，会下载），还会多一行 `View` —— 这就是 viewer 链接，浏览器粘贴直接看渲染版：
+
+```
+=== KODO UPLOAD ===
+Bucket : ai-pr-review-demo
+Key    : reviews/owner-repo-PR123-20260531-120000.md
+Hash   : Fr...
+URL    : http://<domain>/reviews/owner-repo-PR123-20260531-120000.md
+View   : https://<user>.github.io/ai-pr-review/viewer.html?url=http%3A%2F%2F<domain>%2F...
+=== END KODO UPLOAD ===
+```
+
+#### 自定义 viewer 地址
+
+如果你 fork 了仓库或想换 viewer 主机，用 `--kodo-viewer` 覆盖默认值；传空字符串则不输出 `View` 行：
+
+```bash
+ai-pr-review --pr <url> --upload-kodo \
+             --kodo-viewer "https://my-domain.com/viewer.html"
+```
+
 ## License
 
 MIT

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI PR Review · Online Report Viewer</title>
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-light.min.css">
+<link rel="stylesheet"
+      href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<style>
+  body { margin: 0; padding: 0; background: #f6f8fa;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .topbar { background: #24292f; color: #fff; padding: 14px 24px;
+            font-size: 14px; display: flex; justify-content: space-between;
+            align-items: center; flex-wrap: wrap; gap: 12px; }
+  .topbar a { color: #58a6ff; text-decoration: none; }
+  .topbar a:hover { text-decoration: underline; }
+  .container { max-width: 980px; margin: 24px auto; padding: 32px 48px;
+               background: #fff; border: 1px solid #d0d7de; border-radius: 6px;
+               box-shadow: 0 1px 0 rgba(27,31,36,.04); }
+  .markdown-body { font-size: 15px; line-height: 1.65; }
+  .markdown-body pre { background-color: #f6f8fa !important; }
+  .error { color: #82071e; padding: 20px; background: #ffebe9;
+           border: 1px solid #ffabaf; border-radius: 6px;
+           font-family: ui-monospace, SFMono-Regular, monospace;
+           font-size: 13px; word-break: break-all; }
+  .loading { color: #6e7781; padding: 40px; text-align: center; font-size: 14px; }
+  .footer { text-align: center; color: #6e7781; font-size: 12px;
+            margin: 24px auto; max-width: 980px; padding: 0 24px; }
+  @media (max-width: 720px) {
+    .container { padding: 24px 18px; margin: 12px; }
+    .topbar { padding: 12px 16px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span><strong>📋 AI PR Review</strong> · Online Report Viewer</span>
+    <span>
+      <a id="raw-link" href="#" target="_blank" rel="noopener">📥 Raw Markdown</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/KINGXD414/ai-pr-review" target="_blank" rel="noopener">⭐ Source</a>
+    </span>
+  </div>
+  <div class="container">
+    <article id="content" class="markdown-body">
+      <div class="loading">⏳ Loading report ...</div>
+    </article>
+  </div>
+  <div class="footer">
+    Powered by Qiniu KODO + GitHub Pages · rendered client-side with marked.js
+  </div>
+<script>
+(function() {
+  var params = new URLSearchParams(window.location.search);
+  var url = params.get('url');
+  var content = document.getElementById('content');
+  var rawLink = document.getElementById('raw-link');
+
+  function showError(html) {
+    content.innerHTML = '<div class="error">' + html + '</div>';
+  }
+
+  if (!url) {
+    showError('Missing <code>?url=&lt;markdown_url&gt;</code> query parameter.<br>' +
+              'Example: <code>viewer.html?url=https://example.com/report.md</code>');
+    return;
+  }
+
+  // Basic protocol check
+  if (!/^https?:\/\//i.test(url)) {
+    showError('Only http(s) URLs are allowed. Got: ' + url);
+    return;
+  }
+
+  rawLink.href = url;
+
+  // Configure marked to use highlight.js when available
+  marked.setOptions({
+    highlight: function(code, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        try { return hljs.highlight(code, { language: lang }).value; } catch (_) {}
+      }
+      try { return hljs.highlightAuto(code).value; } catch (_) { return code; }
+    },
+    breaks: false,
+    gfm: true,
+    headerIds: true,
+    mangle: false
+  });
+
+  fetch(url, { mode: 'cors', cache: 'no-store' })
+    .then(function(resp) {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
+      return resp.text();
+    })
+    .then(function(md) {
+      content.innerHTML = marked.parse(md);
+      var h1 = content.querySelector('h1');
+      if (h1 && h1.textContent) {
+        document.title = h1.textContent.trim() + ' · AI PR Review';
+      }
+    })
+    .catch(function(err) {
+      showError('<strong>Failed to load report</strong><br>' +
+                'URL: ' + url + '<br>' +
+                'Error: ' + (err && err.message ? err.message : err) + '<br><br>' +
+                'Hint: make sure the markdown URL is publicly accessible ' +
+                'and the server returns <code>Access-Control-Allow-Origin: *</code>.');
+    });
+})();
+</script>
+</body>
+</html>

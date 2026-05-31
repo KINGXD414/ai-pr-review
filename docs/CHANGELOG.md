@@ -12,9 +12,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Hand-rolled upload-token signing (PutPolicy + HMAC-SHA1 + URL-safe base64); no Qiniu SDK dependency.
   - `PutPolicy.scope` is pinned to `bucket:key` so a leaked demo token can only overwrite the same key.
   - Credentials read from env `QINIU_AK` / `QINIU_SK` / `QINIU_BUCKET` / `QINIU_REGION` / `QINIU_DOMAIN`.
+- Online markdown viewer (`docs/viewer.html`) hosted via GitHub Pages.
+  - Pure client-side rendering with marked.js + highlight.js + github-markdown-css from CDN.
+  - Works around Qiniu default-domain forced `Content-Disposition: attachment` by fetching the raw md cross-origin (KODO sets `Access-Control-Allow-Origin: *`) and rendering in-browser.
+  - CLI now prints an extra `View   : <viewer>?url=<encoded>` line so reviewers can open the rendered report with one click.
+  - New CLI flag `--kodo-viewer` lets users override the viewer base URL (default: `https://kingxd414.github.io/ai-pr-review/viewer.html`); empty string suppresses the `View` line.
 
 ### Changed
 - README: added a new "☁️ KODO 对象存储集成 (v0.3)" section documenting the workflow and the safety design.
+- README: documented the GitHub Pages viewer enablement flow (Settings -> Pages -> /docs branch).
 
 
 See [Issue #27](https://github.com/KINGXD414/ai-pr-review/issues/27) for v0.3 backlog.
