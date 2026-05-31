@@ -2,11 +2,18 @@
 
 > 七牛云×XEngineer暑期实训营 · 题目三
 
-## Demo 视频
+## Demo 视频 & 在线演示
 
-> [B 站演示视频（10 分钟）](https://www.bilibili.com/video/TODO_REPLACE_BEFORE_DEADLINE)
+> [B 站演示视频（10 分钟）](https://www.bilibili.com/video/TODO_REPLACE_BEFORE_DEADLINE) · [🌐 在线交互式演示](https://kingxd414.github.io/ai-pr-review/)
 
-实战剧本：muduo 真实 PR → AI 30 秒定位风险 → 修复 commit → AI Approve。
+**两种体验方式**：
+
+- **B 站视频**：10 分钟完整剧本演示，含自审 demo + 5×4 评测矩阵 + 工程化决策
+- **在线演示页**（GitHub Pages）：输入 GitHub PR URL → 实时跑 AI 审查 → 渲染 Markdown 报告
+  - 4 种审查模式可切换：Baseline / Persona·Linus / Self-Critique / Consensus 3
+  - 8 份预生成报告即时返回（muduo PR #729 / #505、nlohmann/json #5187、自审 PR #26）
+  - 在线审查白名单：muduo / json / spdlog / fmt / abseil / 本项目（防 API 滥用）
+  - 后端开窗期间可输任意白名单 PR 实时审查
 
 > 视频链接将在 2026-05-31 23:00 前更新为最终录制版本。
 

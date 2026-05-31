@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI PR Review 助手 · 在线演示</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-light.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github.min.css">
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;--text2:#8b949e;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--orange:#d29922;--purple:#bc8cff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;min-height:100vh}
+.hero{background:linear-gradient(135deg,#0d1117 0%,#1a2332 100%);border-bottom:1px solid var(--border);padding:48px 24px 36px;text-align:center}
+.hero h1{font-size:32px;font-weight:700;margin-bottom:8px}.hero h1 span{color:var(--accent)}
+.hero p{color:var(--text2);font-size:15px;max-width:600px;margin:0 auto 24px;line-height:1.6}
+.badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--border);color:var(--text2)}
+.badge.b-cpp{color:var(--accent);border-color:#1f6feb44}.badge.b-llm{color:var(--purple);border-color:#8957e544}.badge.b-libclang{color:var(--green);border-color:#23863644}
+.main{max-width:1280px;margin:0 auto;padding:24px;display:grid;grid-template-columns:360px 1fr;gap:24px}
+@media(max-width:900px){.main{grid-template-columns:1fr}}
+.sidebar{display:flex;flex-direction:column;gap:16px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px}
+.card h3{font-size:13px;color:var(--text2);margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+.input-group{margin-bottom:12px}.input-group label{display:block;font-size:13px;color:var(--text2);margin-bottom:6px}
+.input-group input,.input-group select{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;font-family:ui-monospace,SFMono-Regular,monospace;outline:none;transition:border-color .2s}
+.input-group input:focus,.input-group select:focus{border-color:var(--accent)}.input-group select option{background:var(--surface);color:var(--text)}
+.btn-run{width:100%;padding:12px;background:#238636;color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;transition:background .2s}
+.btn-run:hover:not(:disabled){background:#2ea043}.btn-run:disabled{background:#21262d;color:var(--text2);cursor:not-allowed}
+.backend-status{font-size:11px;padding:6px 10px;border-radius:4px;margin-top:8px;text-align:center}
+.backend-status.online{background:#23863622;color:var(--green)}.backend-status.offline{background:#f8514922;color:var(--red)}.backend-status.checking{background:#d2992222;color:var(--orange)}
+.quick-list{list-style:none}.quick-list li{padding:10px 0;border-bottom:1px solid var(--border)}.quick-list li:last-child{border-bottom:none;padding-bottom:0}
+.quick-item{display:flex;justify-content:space-between;align-items:center}
+.quick-item .pr-name{font-size:13px;color:var(--text);cursor:pointer;font-weight:500}.quick-item .pr-name:hover{color:var(--accent)}
+.quick-item .pr-modes{font-size:11px;color:var(--text2)}
+.mode-pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.mode-pill{padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid var(--border);color:var(--text2);background:transparent;transition:all .2s}
+.mode-pill:hover{border-color:var(--accent);color:var(--accent)}.mode-pill.active{background:#1f6feb33;border-color:var(--accent);color:var(--accent)}
+.whitelist-list{font-size:12px;color:var(--text2);line-height:1.8}.whitelist-list code{background:var(--bg);padding:2px 6px;border-radius:3px;font-size:11px;color:var(--accent)}
+.report-area{min-height:400px}.report-card{background:#fff;border-radius:8px;padding:40px 48px;box-shadow:0 1px 3px rgba(0,0,0,.12)}.report-card .markdown-body{font-size:15px;line-height:1.65;color:#1f2328}.report-card .markdown-body pre{background-color:#f6f8fa!important}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;color:var(--text2);text-align:center;padding:48px;border:2px dashed var(--border);border-radius:8px}
+.empty-state .icon{font-size:48px;margin-bottom:16px}.empty-state h2{font-size:18px;color:var(--text);margin-bottom:8px}.empty-state p{font-size:14px;max-width:400px;line-height:1.6}
+.loading-bar{display:none;padding:24px;background:var(--surface);border-radius:8px;border:1px solid var(--border);margin-bottom:16px}
+.loading-bar.show{display:block}.loading-bar .progress-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.spinner{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-bar .title{font-size:14px;font-weight:600}.loading-bar .steps{font-size:13px;color:var(--text2);line-height:2;padding-left:32px}
+.loading-bar .steps .step.done{color:var(--green)}.loading-bar .steps .step.current{color:var(--accent);font-weight:600}
+.loading-bar .runtime{font-size:11px;color:var(--text2);margin-top:8px;text-align:right}
+.status-tag{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600}
+.status-tag.st-live{background:#23863622;color:var(--green)}.status-tag.st-cached{background:#1f6feb22;color:var(--accent)}.status-tag.st-demo{background:#d2992222;color:var(--orange)}
+.footer{text-align:center;padding:32px 24px;color:var(--text2);font-size:12px;border-top:1px solid var(--border);margin-top:48px}
+.footer a{color:var(--accent);text-decoration:none}.footer a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<div class="hero">
+  <h1><span>AI PR Review</span> 助手</h1>
+  <p>给一个 GitHub PR 链接，它读 diff、查上下文、调 LLM、出审查报告。<br>C++17 · DeepSeek · libclang · 三审制</p>
+  <div class="badges">
+    <span class="badge b-cpp">⬡ C++17</span>
+    <span class="badge b-llm">🤖 DeepSeek</span>
+    <span class="badge b-libclang">🔍 libclang</span>
+    <span class="badge">🛡️ 三审制</span>
+    <span class="badge">📦 零 SDK · KODO</span>
+  </div>
+</div>
+<div class="main">
+  <div class="sidebar">
+    <div class="card">
+      <h3>🔍 Review 配置</h3>
+      <div class="input-group"><label>GitHub PR URL</label><input type="text" id="pr-url" placeholder="https://github.com/owner/repo/pull/123" spellcheck="false"></div>
+      <div class="input-group"><label>审查模式</label>
+        <select id="mode-select"><option value="baseline">Baseline（默认）</option><option value="linus">Persona · Linus（严厉审查）</option><option value="critique">Self-Critique（自我质疑）</option><option value="consensus">Consensus 3（多数裁决）</option></select>
+      </div>
+      <button class="btn-run" id="btn-run" onclick="runReview()">▶ 开始 Review</button>
+      <div class="backend-status checking" id="backend-status">⏳ 检测后端 ...</div>
+    </div>
+    <div class="card">
+      <h3>⚡ 快速演示（即时返回）</h3>
+      <ul class="quick-list">
+        <li><div class="quick-item"><span class="pr-name" onclick="quickFill('muduo-729')">muduo PR #729</span><span class="pr-modes">4 种</span></div>
+          <div class="mode-pills"><span class="mode-pill" onclick="quickRun(event,'muduo-729','baseline')">Baseline</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','linus')">Linus</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','critique')">Critique</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','consensus')">Consensus</span></div></li>
+        <li><div class="quick-item"><span class="pr-name" onclick="quickFill('muduo-505')">muduo PR #505</span><span class="pr-modes">2 种</span></div>
+          <div class="mode-pills"><span class="mode-pill" onclick="quickRun(event,'muduo-505','baseline')">Baseline</span><span class="mode-pill" onclick="quickRun(event,'muduo-505','linus')">Linus</span></div></li>
+        <li><div class="quick-item"><span class="pr-name" onclick="quickFill('json-5187')">nlohmann/json PR #5187</span><span class="pr-modes">1 种</span></div>
+          <div class="mode-pills"><span class="mode-pill" onclick="quickRun(event,'json-5187','baseline')">Baseline</span></div></li>
+        <li><div class="quick-item"><span class="pr-name" onclick="quickFill('self-pr26')">ai-pr-review PR #26（自审）</span><span class="pr-modes">1 种</span></div>
+          <div class="mode-pills"><span class="mode-pill" onclick="quickRun(event,'self-pr26','baseline')">Baseline</span></div></li>
+      </ul>
+    </div>
+    <div class="card"><h3>📋 在线审查白名单</h3>
+      <div class="whitelist-list">在线审查仅放行以下 repo：<br>• <code>chenshuo/muduo</code><br>• <code>nlohmann/json</code><br>• <code>gabime/spdlog</code><br>• <code>fmtlib/fmt</code><br>• <code>abseil/abseil-cpp</code><br>• <code>KINGXD414/ai-pr-review</code><br><br>其他 repo 请使用 CLI，<a href="https://github.com/KINGXD414/ai-pr-review" style="color:var(--accent)">见仓库</a></div>
+    </div>
+  </div>
+  <div class="report-area">
+    <div class="loading-bar" id="loading"><div class="progress-header"><div class="spinner"></div><div class="title" id="loading-title">正在审查 PR ...</div></div>
+      <div class="steps"><div class="step" id="step1">⏳ 获取 PR diff</div><div class="step" id="step2">⏳ libclang 解析 C++ 上下文</div><div class="step" id="step3">⏳ 调用 DeepSeek 生成审查</div><div class="step" id="step4">⏳ 渲染审查报告</div></div>
+      <div class="runtime" id="runtime"></div>
+    </div>
+    <div class="empty-state" id="empty-state"><div class="icon">🔍</div><h2>选择一个 PR 开始体验</h2><p>左侧输入 GitHub PR 链接 → 点击「开始 Review」<br>或点击「快速演示」直接查看预生成报告</p></div>
+    <div id="single-report" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span class="status-tag" id="report-tag">📺 报告</span><span style="font-size:12px;color:var(--text2)" id="report-meta"></span>
+      </div>
+      <div class="report-card"><article id="report-content" class="markdown-body"></article></div>
+    </div>
+  </div>
+</div>
+<div class="footer">AI PR Review 助手 · <a href="https://github.com/KINGXD414/ai-pr-review">GitHub 仓库</a> · 七牛云 × XEngineer 实训营 · 题目三<br>Powered by C++17 / DeepSeek / libclang · Reports rendered with marked.js</div>
+<script src="config.js"></script>
+<script>
+const REPORTS={};
+const PR_MAP={
+  'muduo-729':{repo:'chenshuo/muduo',pr:729,label:'muduo PR #729'},
+  'muduo-505':{repo:'chenshuo/muduo',pr:505,label:'muduo PR #505'},
+  'json-5187':{repo:'nlohmann/json',pr:5187,label:'nlohmann/json PR #5187'},
+  'self-pr26':{repo:'KINGXD414/ai-pr-review',pr:26,label:'ai-pr-review PR #26'}
+};
+const MODE_LABELS={baseline:'Baseline',linus:'Persona · Linus',critique:'Self-Critique',consensus:'Consensus 3'};
+let backendOnline=false;
+fetch('reports_data.json').then(r=>r.json()).then(d=>Object.assign(REPORTS,d));
+async function checkBackend(){
+  const s=document.getElementById('backend-status');
+  if(!window.BACKEND_URL||window.BACKEND_URL.includes('YOUR_NGROK')){s.className='backend-status offline';s.textContent='🔴 后端未配置（仅快速演示可用）';return}
+  try{const r=await fetch(window.BACKEND_URL+'/health');if(r.ok){backendOnline=true;s.className='backend-status online';s.textContent='🟢 后端在线 · 可输入任意白名单 PR'}else throw 0}
+  catch{s.className='backend-status offline';s.textContent='🔴 后端离线（仅快速演示可用）'}
+}
+checkBackend();
+function quickFill(a){const i=PR_MAP[a];if(i)document.getElementById('pr-url').value='https://github.com/'+i.repo+'/pull/'+i.pr}
+function quickRun(e,a,m){document.getElementById('mode-select').value=m;quickFill(a);document.querySelectorAll('.mode-pill').forEach(p=>p.classList.remove('active'));if(e?.target)e.target.classList.add('active');showCached(a,m)}
+function showCached(a,m){const k=a+'|'+m;if(!REPORTS[k]){alert('此组合暂无缓存报告');return}const i=PR_MAP[a];hideAll();document.getElementById('single-report').style.display='block';const t=document.getElementById('report-tag');t.className='status-tag st-cached';t.textContent='📺 预生成报告（缓存命中）';document.getElementById('report-meta').textContent=i.label+' · '+MODE_LABELS[m];document.getElementById('report-content').innerHTML=marked.parse(atob(REPORTS[k]));document.querySelectorAll('pre code').forEach(el=>hljs.highlightElement(el))}
+function hideAll(){document.getElementById('loading').classList.remove('show');document.getElementById('empty-state').style.display='none';document.getElementById('single-report').style.display='none'}
+async function runReview(){
+  const url=document.getElementById('pr-url').value.trim(),mode=document.getElementById('mode-select').value;
+  if(!url){alert('请输入 PR URL');return}
+  const m=url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+  if(!m){alert('URL 格式不对，应类似：https://github.com/owner/repo/pull/123');return}
+  const repo=m[1],pr=parseInt(m[2]);
+  const alias=Object.keys(PR_MAP).find(a=>PR_MAP[a].repo===repo&&PR_MAP[a].pr===pr);
+  if(alias&&REPORTS[alias+'|'+mode]){showCached(alias,mode);return}
+  if(!backendOnline){alert('该 PR 没有缓存报告，需要在线审查。\n\n后端当前离线，请从左侧「快速演示」选预生成组合');return}
+  hideAll();document.getElementById('loading').classList.add('show');
+  document.getElementById('loading-title').textContent='正在审查 '+repo+'#'+pr+' ...';
+  resetSteps();const st=animateSteps();document.getElementById('btn-run').disabled=true;
+  try{
+    const r=await fetch(window.BACKEND_URL+'/api/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url,mode})});
+    clearInterval(st);const data=await r.json();
+    if(!r.ok||!data.success){hideAll();document.getElementById('empty-state').style.display='flex';alert('审查失败：\n\n'+(data.error||'HTTP '+r.status));return}
+    for(let i=1;i<=4;i++){const el=document.getElementById('step'+i);el.className='step done';el.textContent=el.textContent.replace('⏳','✅')}
+    document.getElementById('runtime').textContent='⏱ 耗时 '+data.runtime_sec.toFixed(1)+'s · 报告 '+data.report_md.length+' 字符';
+    await new Promise(r=>setTimeout(r,400));hideAll();document.getElementById('single-report').style.display='block';
+    const t=document.getElementById('report-tag');t.className='status-tag st-live';t.textContent='🟢 实时生成（'+data.runtime_sec.toFixed(1)+'s）';
+    document.getElementById('report-meta').textContent=repo+'#'+pr+' · '+MODE_LABELS[mode];
+    document.getElementById('report-content').innerHTML=marked.parse(data.report_md);
+    document.querySelectorAll('pre code').forEach(el=>hljs.highlightElement(el));
+  }catch(e){clearInterval(st);hideAll();document.getElementById('empty-state').style.display='flex';alert('请求失败：'+e.message)}
+  finally{document.getElementById('btn-run').disabled=false}
+}
+function resetSteps(){['step1','step2','step3','step4'].forEach((id,i)=>{const el=document.getElementById(id);el.className='step';el.textContent='⏳ '+['获取 PR diff','libclang 解析 C++ 上下文','调用 DeepSeek 生成审查','渲染审查报告'][i]});document.getElementById('runtime').textContent=''}
+function animateSteps(){let i=0;return setInterval(()=>{if(i<3){const el=document.getElementById('step'+(i+1));el.className='step done';el.textContent=el.textContent.replace('⏳','✅');const n=document.getElementById('step'+(i+2));if(n)n.className='step current';i++}},2500)}
+marked.setOptions({gfm:true,breaks:true});
+</script>
+</body>
+</html>
