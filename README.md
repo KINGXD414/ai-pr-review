@@ -102,7 +102,7 @@ GitHub PR
 
 **评测集**：5 条真实 merged PR（2 高 2 中 1 低），来自 nlohmann/json、spdlog、muduo 三个开源项目，位于 `code/eval/cases.json`；候选 PR 的人工标注详见 `eval/dataset_v2.md`。
 
-**Baseline 实测**：v0.1.0 单审基线已跑通，2/5 cases 综合分 **85%**（muduo-505 100% + muduo-729 70%），完整报告 `code/eval/baseline_report.md`。v0.1.0 vs v0.2.0 三招对比矩阵（5 cases × 4 configs）将在 Day-3 完成，对比报告见 `code/eval/comparison_report.md`。
+**v0.2.0 实测**：完整 5 cases × 4 configs 评测矩阵已跑完，20 次 LLM 调用全部成功。4 配置综合分：baseline **82%** / persona-linus **87%** / self-critique **80%** / consensus-3 **82%**。高难度 case 上 persona-linus 平均提升 +22.5%（spdlog-3594 +30%），self-critique 在低难度被拖累 -2%，consensus-3 零增益但 3 倍开销。完整数据 + 诚实分析见 `code/eval/comparison_report.md`，v0.1.0 baseline 历史报告见 `code/eval/baseline_report.md`。
 
 ## 差异化特性 v0.2.0（三招）
 
@@ -145,7 +145,7 @@ GitHub PR
 ./ai-pr-review --repo owner/repo --pr 123 --consensus 3
 ```
 
-> 三招互斥使用。v0.1.0 baseline 实测综合分 85%（见 `code/eval/baseline_report.md`），三招对比矩阵将在 Day-3 完成并写入 `code/eval/comparison_report.md`。
+> 三招互斥使用。v0.2.0 实测：persona-linus 综合 87%（最佳），baseline 82%，self-critique 80%，consensus-3 82%（零增益但 3x 开销）。完整 5×4 矩阵见 `code/eval/comparison_report.md`。
 
 ## 构建与运行
 
@@ -281,7 +281,7 @@ ai-pr-review/
 │   ├── eval/                   # 评测数据与实测产出
 │   │   ├── cases.json          # 评测集（5 条标注 PR，dataset_v2 子集）
 │   │   ├── baseline_report.md  # v0.1.0 baseline 实测报告（综合 85%）
-│   │   ├── comparison_report.md # v0.1.0 vs v0.2.0 三招对比（Day-3 产出）
+│   │   ├── comparison_report.md # v0.2.0 三招对比矩阵（5×4，已完成）
 │   │   └── runs/               # 各次评测原始输出（runs/<时间戳>/）
 │   └── tests/                  # GTest 单元测试
 │       ├── test_rule_engine.cpp
@@ -375,7 +375,7 @@ MIT
 
 适用于 Linux / macOS / Windows（WSL2 或 Docker Desktop）。
 
-**从 GitHub Container Registry 拉镜像**（仓库公开后 `v0.2.0` tag 自动构建）：
+**从 GitHub Container Registry 拉镜像**（`v0.2.0` 已自动构建并发布，仓库公开后可直接拉取）：
 
 ```bash
 docker pull ghcr.io/kingxd414/ai-pr-review:latest
