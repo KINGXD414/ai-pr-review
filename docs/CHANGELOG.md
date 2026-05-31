@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+See [Issue #27](https://github.com/KINGXD414/ai-pr-review/issues/27) for v0.3 backlog.
+
+## [0.2.0] - 2026-05-31
+
+First tagged release. Covers the full v0.1 + v0.2 development cycle: AST-aware
+rule engine, JSON-driven evaluation harness, four review modes
+(baseline / persona / self-critique / consensus), containerised deployment, and
+a self-reviewing GitHub Actions workflow.
+
 ### Added
 
 - AST analyzer: libclang-based C/C++ context extractor for PR review (#2)
@@ -20,11 +29,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - RuleHit struct with rule_id / severity / file / line / message / suggestion (#18)
 - Engine::run(ParsedDiff, AstSummary*) interface (#18)
 - Severity enum class (Info / Warn / Error) with severity_str() helper (#18)
+- Dockerfile + .dockerignore for containerised deployment (#25)
+- GitHub Actions `release.yml`: build & publish linux-x64 binary + Docker image to ghcr.io on tag push (#25)
+- GitHub Actions `pr_review.yml`: auto-comment AI review on every PR, sticky comment is updated in place (no comment spam)
+- v0.2.0 evaluation matrix: 5 cases × 4 configs = 20 LLM calls, full real data backfilled into `code/eval/comparison_report.md` (#26)
+- MIT LICENSE file with dual copyright (KINGXD414 + love-June)
 
 ### Changed
 
 - Renamed `code/src/rule/` to `code/src/rules/` per Issue #1 convention (#6)
 - ADR-001 v2: removed internal CLI parameter names, aligned persona descriptions with implementation (#12)
+- README expanded with full deployment section (Docker + binary release) (#25)
+- comparison_report v0.2.0: high-difficulty gain reported as +22.5% arithmetic mean across two cases (not a uniform +30%), to avoid over-generalising a single-case win (#26)
 
 ### Fixed
 
@@ -35,5 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - DeepSeek API key passed via environment variable, never logged (#7)
 - GitHub token handled through CLI flag with no persistent storage (#8)
+- `pr_review.yml` reads `DEEPSEEK_API_KEY` from repository secrets, never committed to the repo
 
-[Unreleased]: https://github.com/KINGXD414/ai-pr-review/compare/main...HEAD
+[Unreleased]: https://github.com/KINGXD414/ai-pr-review/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/KINGXD414/ai-pr-review/releases/tag/v0.2.0
