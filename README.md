@@ -159,7 +159,7 @@ GitHub PR
 
 
 
-## Self-Reviewing Workflow（吃自己狗粮）
+## Self-Reviewing Workflow
 
 `.github/workflows/pr_review.yml` 在每次 PR `opened` / `synchronize` 时触发，调用本项目 review 自己的 diff，并把结果作为 sticky comment 发回 PR——HTML 注释 `<!-- ai-pr-review-bot -->` 作为幂等锚点，**同一 PR 永远只占一条评论，不刷屏**（参考 Codecov / DangerJS 做法）。
 
