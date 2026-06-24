@@ -2,22 +2,28 @@
  * @file main.cpp
  * @brief CLI entry point for the AI PR Review assistant.
  *
- * Pipeline: parse args -> resolve credentials -> parse PR URL ->
- * GitHub API fetch -> (optional) AST analysis -> assemble prompt ->
- * DeepSeek chat -> write Markdown report.
+ * Pipeline:
+ *   parse args -> resolve credentials -> parse PR URL ->
+ *   GitHub API fetch -> rule engine pre-scan -> optional AST analysis ->
+ *   assemble prompt -> run LLM pipeline (persona / consensus / self-critique) ->
+ *   optional KODO upload -> write Markdown report.
  *
- * Day-2: added --persona flag for multi-persona reviewing.
- * Day-2: added --consensus N flag for multi-vote consensus.
- * Day-2: added --self-critique flag for two-pass hallucination filter.
+ * v0.2.1 (P0+P1 refactoring):
+ *   - Rule engine hits injected into LLM prompt (three-layer synergy).
+ *   - Consensus runs are now parallelized via std::async.
+ *   - Prompt builder & report renderer extracted to pipeline/ module.
  */
-
+#include "common/utils.h"
 #include "analyzer/ast_analyzer.h"
 #include "diff/parser.h"
 #include "gateway/llm_gateway.h"
 #include "github/api_client.h"
+#include "pipeline/prompt_builder.h"
+#include "pipeline/report_renderer.h"
 #include "prompt/personas.h"
 #include "prompt/consensus.h"
 #include "prompt/self_critique.h"
+#include "rules/engine.h"
 #include "storage/kodo_client.h"
 
 #include <CLI/CLI.hpp>
@@ -25,12 +31,10 @@
 
 #include <algorithm>
 #include <chrono>
-#include <ctime>
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -38,159 +42,52 @@
 
 namespace {
 
-constexpr std::size_t kMaxFilesInPrompt     = 30;
-constexpr std::size_t kMaxPatchLinesPerFile = 200;
-constexpr std::size_t kMaxBodyCharsInPrompt = 2000;
+/// Convert GitHub PRFile patches + diff parser -> rule engine hits.
+std::vector<aipr::rule::RuleHit> run_rule_engine(
+    const std::vector<aipr::github::PRFile>& files) {
+    aipr::rule::RuleEngine engine;
+    aipr::rule::ParsedDiff pd;
 
-std::string env_or_empty(const char* name) {
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-}
+    for (const auto& f : files) {
+        if (f.patch.empty()) continue;
 
-std::string truncate_patch(const std::string& patch, std::size_t max_lines) {
-    if (patch.empty()) return patch;
-    std::istringstream iss(patch);
-    std::ostringstream oss;
-    std::string line;
-    std::size_t count = 0;
-    while (std::getline(iss, line)) {
-        if (count >= max_lines) {
-            oss << "... (patch truncated, " << max_lines << " lines kept)\n";
-            break;
-        }
-        oss << line << '\n';
-        ++count;
-    }
-    return oss.str();
-}
+        auto hunks = aipr::diff::parse_patch(f.patch);
+        if (hunks.empty()) continue;
 
-std::string build_system_prompt(const std::string& persona) {
-    return aipr::prompt::system_prompt_for(persona);
-}
+        aipr::rule::FileDiff fd;
+        fd.filename = f.filename;
 
-std::string build_user_prompt(
-    const aipr::github::PullRequest& pr,
-    const std::vector<aipr::analyzer::AstSummary>& ast_summaries = {}) {
-
-    std::ostringstream oss;
-    oss << "# PR 元信息\n"
-        << "- 仓库：" << pr.locator.owner << "/" << pr.locator.repo << "\n"
-        << "- 编号：#" << pr.locator.number << "\n"
-        << "- 标题：" << pr.title << "\n"
-        << "- 作者：" << pr.author << "\n"
-        << "- base / head：" << pr.base_ref << " <- " << pr.head_ref << "\n"
-        << "- 链接：" << pr.html_url << "\n\n";
-
-    if (!pr.body.empty()) {
-        std::string body = pr.body;
-        if (body.size() > kMaxBodyCharsInPrompt) {
-            body = body.substr(0, kMaxBodyCharsInPrompt) + "\n...(描述已截断)";
-        }
-        oss << "# PR 描述\n" << body << "\n\n";
-    }
-
-    oss << "# 变更文件（共 " << pr.files.size() << " 个，最多展示 "
-        << kMaxFilesInPrompt << " 个，每个 patch 最多 "
-        << kMaxPatchLinesPerFile << " 行）\n\n";
-
-    const std::size_t limit = std::min(pr.files.size(), kMaxFilesInPrompt);
-    for (std::size_t i = 0; i < limit; ++i) {
-        const auto& f = pr.files[i];
-        oss << "## " << (i + 1) << ". `" << f.filename << "` ["
-            << f.status << ", +" << f.additions << "/-" << f.deletions << "]\n";
-        if (f.patch.empty()) {
-            oss << "_(二进制文件或纯重命名，无 patch)_\n\n";
-            continue;
-        }
-        oss << "```diff\n"
-            << truncate_patch(f.patch, kMaxPatchLinesPerFile)
-            << "```\n\n";
-    }
-
-    if (pr.files.size() > kMaxFilesInPrompt) {
-        oss << "_(另有 " << (pr.files.size() - kMaxFilesInPrompt)
-            << " 个文件未展示，留待 Day 2 的 chunk-merge 策略处理)_\n";
-    }
-
-    // --- AST analysis section (optional, appears when --source-dir is used) ---
-    if (!ast_summaries.empty()) {
-        std::size_t shown = 0;
-        for (const auto& s : ast_summaries) if (s.ok) ++shown;
-        if (shown > 0) {
-            oss << "\n# AST 分析（基于 libclang，含 " << shown << " 个文件）\n\n";
-            for (const auto& s : ast_summaries) {
-                if (!s.ok) continue;
-                oss << s.to_prompt() << "\n";
+        for (const auto& hunk : hunks) {
+            int new_line = hunk.new_start;
+            int old_line = hunk.old_start;
+            for (const auto& dl : hunk.lines) {
+                switch (dl.type) {
+                case aipr::diff::DiffLine::Type::Add:
+                    fd.added_lines.push_back(dl.content);
+                    fd.added_line_nums.push_back(new_line++);
+                    break;
+                case aipr::diff::DiffLine::Type::Del:
+                    fd.removed_lines.push_back(dl.content);
+                    fd.removed_line_nums.push_back(old_line++);
+                    break;
+                case aipr::diff::DiffLine::Type::Context:
+                    ++new_line;
+                    ++old_line;
+                    break;
+                }
             }
         }
+        pd.files.push_back(std::move(fd));
     }
 
-    return oss.str();
+    return engine.run(pd, nullptr);
 }
 
-std::string now_iso() {
-    std::time_t now = std::time(nullptr);
-    std::tm tm_buf{};
-    localtime_r(&now, &tm_buf);
-    char ts[32];
-    std::strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &tm_buf);
-    return ts;
-}
-
-std::string render_report(const aipr::github::PullRequest& pr,
-                          int consensus_n,
-                          const aipr::gateway::LLMResponse& llm,
-                          const std::string& model,
-                          std::chrono::milliseconds elapsed,
-                          const std::string& persona,
-                          bool self_critique_used) {
-    std::ostringstream oss;
-    oss << "# AI PR Review 报告\n\n"
-        << "> 由 `ai-pr-review` 自动生成。仅供辅助参考，最终判断以 reviewer 为准。\n"
-        << "> " << aipr::prompt::persona_badge(persona) << "\n";
-    if (consensus_n > 1) {
-        oss << "> 🗳️ Consensus 模式 — " << consensus_n
-            << " 次独立审查后按多数票合成，保留阈值 ⌈N/2⌉="
-            << ((consensus_n + 1) / 2) << "\n";
-    }
-    if (self_critique_used) {
-        oss << "> 🪞 Self-Critique 模式 — 二审已对一审进行幻觉过滤、严重度校准、建议强化\n";
-    }
-    oss << "\n"
-        << "| 项 | 值 |\n"
-        << "| --- | --- |\n"
-        << "| PR | [" << pr.locator.owner << "/" << pr.locator.repo
-        << " #" << pr.locator.number << "](" << pr.html_url << ") |\n"
-        << "| 标题 | " << pr.title << " |\n"
-        << "| 作者 | " << pr.author << " |\n"
-        << "| Persona | " << aipr::prompt::persona_badge(persona) << " |\n"
-        << "| 文件数 | " << pr.files.size() << " |\n"
-        << "| 模型 | " << model << " |\n"
-        << "| Consensus | " << (consensus_n > 1
-                                ? ("✅ N=" + std::to_string(consensus_n)
-                                   + "（阈值 " + std::to_string((consensus_n + 1) / 2) + "）")
-                                : std::string("未启用")) << " |\n"
-        << "| Self-Critique | " << (self_critique_used ? "✅ 启用（二阶段）" : "未启用") << " |\n"
-        << "| LLM 调用次数 | " << llm.attempts << " |\n"
-        << "| 用时 | " << elapsed.count() << " ms |\n"
-        << "| 生成时间 | " << now_iso() << " |\n\n"
-        << "---\n\n";
-
-    if (llm.ok) {
-        oss << llm.content << "\n";
-    } else {
-        oss << "## ⚠️ 评审失败\n\n"
-            << "调用 LLM 失败：`" << llm.error << "`（重试 "
-            << llm.attempts << " 次）。\n";
-    }
-    return oss.str();
-}
-
-} // namespace
+}  // namespace
 
 int main(int argc, char** argv) {
     CLI::App app{"AI-powered Pull Request review assistant"};
-    app.set_version_flag("--version", std::string("ai-pr-review 0.2.0"));
+    app.set_version_flag("--version", std::string("ai-pr-review 0.2.1"));
 
     std::string pr_url;
     std::string github_token;
@@ -209,7 +106,8 @@ int main(int argc, char** argv) {
     bool self_critique = false;
     bool upload_kodo = false;
     std::string kodo_prefix = "reviews";
-    std::string kodo_viewer_base = "https://kingxd414.github.io/ai-pr-review/viewer.html";
+    std::string kodo_viewer_base;  // deprecated
+    std::string cache_dir;  // P1-2: directory for LLM response cache
 
     app.add_option("--pr", pr_url,
         "GitHub PR URL, e.g. https://github.com/owner/repo/pull/123")
@@ -246,17 +144,19 @@ int main(int argc, char** argv) {
     app.add_option("--kodo-prefix", kodo_prefix,
         "Key prefix used inside the KODO bucket (default: reviews)");
     app.add_option("--kodo-viewer", kodo_viewer_base,
-        "Base URL of the markdown viewer (GitHub Pages) for rendering uploaded reports;\n set empty to suppress the View URL line");
-    app.add_flag("-v,--verbose", verbose,
-        "Enable debug logs");
+        "Deprecated: KODO links are now embedded directly in the report footer");
+    app.add_flag("-v,--verbose", verbose, "Enable debug logs");
+    app.add_option("--cache-dir", cache_dir,
+        "Directory for LLM response cache (empty = disabled, e.g. ~/.cache/ai-pr-review/)");
 
     CLI11_PARSE(app, argc, argv);
 
     spdlog::set_level(verbose ? spdlog::level::debug : spdlog::level::info);
     spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
 
-    if (github_token.empty()) github_token = env_or_empty("GITHUB_TOKEN");
-    if (llm_key.empty())      llm_key      = env_or_empty("DEEPSEEK_API_KEY");
+    // --- Resolve credentials ---
+    if (github_token.empty()) github_token = aipr::common::env_or_empty("GITHUB_TOKEN");
+    if (llm_key.empty())      llm_key      = aipr::common::env_or_empty("DEEPSEEK_API_KEY");
     if (llm_key.empty()) {
         spdlog::error("LLM key missing: pass --llm-key or set DEEPSEEK_API_KEY");
         return 2;
@@ -265,13 +165,14 @@ int main(int argc, char** argv) {
         spdlog::warn("GitHub token empty -- using anonymous access (60 req/h).");
     }
 
-    // Validate persona early
+    // Validate persona
     if (persona != "default" && persona != "linus" && persona != "mentor"
         && persona != "devil" && persona != "zen") {
         spdlog::error("Unknown persona '{}'. Choose: default | linus | mentor | devil | zen", persona);
         return 2;
     }
 
+    // --- Parse PR URL & fetch from GitHub ---
     auto loc = aipr::github::parse_pr_url(pr_url);
     if (!loc) {
         spdlog::error("Invalid PR URL: {}", pr_url);
@@ -292,6 +193,15 @@ int main(int argc, char** argv) {
     if (pr->files.empty()) {
         spdlog::warn("PR has zero changed files -- nothing to review.");
         return 0;
+    }
+
+    // ===== P0-1: Rule engine pre-scan (three-layer synergy) =====
+    auto rule_hits = run_rule_engine(pr->files);
+    spdlog::info("Rule engine: {} hit(s) across {} file(s)",
+                 rule_hits.size(), pr->files.size());
+    for (const auto& h : rule_hits) {
+        spdlog::debug("  [{}] {}:{} — {}", aipr::rule::severity_str(h.severity),
+                      h.file, h.line, h.message);
     }
 
     // --- Optional AST analysis via --source-dir ---
@@ -319,12 +229,15 @@ int main(int argc, char** argv) {
         spdlog::info("AST: analyzed {} file(s) total", ast_summaries.size());
     }
 
-    const std::string system_prompt = build_system_prompt(persona);
-    const std::string user_prompt   = build_user_prompt(*pr, ast_summaries);
+    // --- Build prompts (rule hits now injected into user prompt) ---
+    const std::string system_prompt = aipr::pipeline::build_system_prompt(persona);
+    const std::string user_prompt   = aipr::pipeline::build_user_prompt(*pr, ast_summaries, rule_hits);
     spdlog::debug("System prompt: {} chars", system_prompt.size());
     spdlog::debug("User prompt: {} chars", user_prompt.size());
-    spdlog::info("Persona: {}", persona);
+    spdlog::info("Persona: {} | Consensus N: {} | Self-Critique: {}",
+                 persona, consensus_n, self_critique ? "on" : "off");
 
+    // --- LLM config ---
     aipr::gateway::LLMConfig cfg;
     cfg.host            = llm_host;
     cfg.path            = llm_path;
@@ -333,66 +246,84 @@ int main(int argc, char** argv) {
     cfg.timeout_seconds = timeout_s;
     cfg.max_retries     = retries;
     cfg.temperature     = 0.2;
-
-    // --- Stage 1: run N independent reviews (N=1 keeps default behaviour) ---
-    // Raise temperature when N>1 so the N runs actually differ enough for voting.
-    if (consensus_n > 1) cfg.temperature = 0.7;
+    cfg.cache_dir       = cache_dir;
 
     aipr::gateway::LLMGateway gw(cfg);
-    spdlog::info("Calling {} on {}{} (persona={}, consensus N={}) ...",
-                 model, llm_host, llm_path, persona, consensus_n);
+    spdlog::info("Calling {} on {}{} ...", model, llm_host, llm_path);
 
     const auto t0 = std::chrono::steady_clock::now();
     aipr::gateway::LLMResponse resp;
     std::vector<std::string> stage1_reports;
-    stage1_reports.reserve(consensus_n);
     int total_attempts = 0;
-    for (int i = 1; i <= consensus_n; ++i) {
-        spdlog::info("  consensus run {}/{} ...", i, consensus_n);
-        auto r = gw.chat(system_prompt, user_prompt);
-        total_attempts += r.attempts;
-        if (!r.ok) {
-            spdlog::error("LLM run {}/{} failed after {} attempt(s): {}",
-                          i, consensus_n, r.attempts, r.error);
+
+    // ===== P1-1: Consensus — parallelized via std::async =====
+    if (consensus_n > 1) {
+        cfg.temperature = 0.7;  // higher temp so runs differ
+        aipr::gateway::LLMGateway gw_parallel(cfg);
+
+        stage1_reports.resize(consensus_n);
+        std::vector<std::future<aipr::gateway::LLMResponse>> futures;
+        futures.reserve(consensus_n);
+
+        for (int i = 0; i < consensus_n; ++i) {
+            futures.push_back(std::async(std::launch::async, [&gw_parallel, &system_prompt, &user_prompt, i, consensus_n]() {
+                spdlog::info("  consensus run {}/{} (parallel) ...", i + 1, consensus_n);
+                return gw_parallel.chat(system_prompt, user_prompt);
+            }));
+        }
+
+        bool all_ok = true;
+        for (int i = 0; i < consensus_n; ++i) {
+            auto r = futures[i].get();
+            total_attempts += r.attempts;
+            if (!r.ok) {
+                spdlog::error("LLM run {}/{} failed after {} attempt(s): {}",
+                              i + 1, consensus_n, r.attempts, r.error);
+                resp = std::move(r);
+                all_ok = false;
+                break;
+            }
+            spdlog::info("  run {}/{} ok, {} chars", i + 1, consensus_n, r.content.size());
+            stage1_reports[i] = r.content;
             resp = std::move(r);
-            stage1_reports.clear();
-            break;
         }
-        spdlog::info("  run {}/{} ok, {} chars", i, consensus_n, r.content.size());
-        stage1_reports.push_back(r.content);
-        resp = std::move(r);
-    }
 
-    // --- Consensus stage: meta-review when we have N>=2 successful runs ---
-    if (consensus_n > 1 && !stage1_reports.empty()
-            && (int)stage1_reports.size() == consensus_n) {
-        spdlog::info("Consensus: consolidating {} runs by majority vote ...",
-                     consensus_n);
-        aipr::gateway::LLMConfig cfg2 = cfg;
-        cfg2.temperature = 0.2; // meta-review should be deterministic
-        aipr::gateway::LLMGateway gw2(cfg2);
-        const std::string consensus_sys  =
-            aipr::prompt::consensus_system_prompt(consensus_n);
-        const std::string consensus_user =
-            aipr::prompt::build_consensus_user_prompt(stage1_reports, user_prompt);
-        auto resp2 = gw2.chat(consensus_sys, consensus_user);
-        total_attempts += resp2.attempts;
-        if (resp2.ok) {
-            spdlog::info("Consensus stage ok after {} attempt(s), {} chars",
-                         resp2.attempts, resp2.content.size());
-            resp = std::move(resp2);
+        // --- Consensus meta-review ---
+        if (all_ok && (int)stage1_reports.size() == consensus_n) {
+            spdlog::info("Consensus: consolidating {} runs by majority vote ...", consensus_n);
+            aipr::gateway::LLMConfig cfg2 = cfg;
+            cfg2.temperature = 0.2;
+            aipr::gateway::LLMGateway gw2(cfg2);
+            const std::string consensus_sys  = aipr::prompt::consensus_system_prompt(consensus_n);
+            const std::string consensus_user = aipr::prompt::build_consensus_user_prompt(stage1_reports, user_prompt);
+            auto resp2 = gw2.chat(consensus_sys, consensus_user);
+            total_attempts += resp2.attempts;
+            if (resp2.ok) {
+                spdlog::info("Consensus stage ok after {} attempt(s), {} chars",
+                             resp2.attempts, resp2.content.size());
+                resp = std::move(resp2);
+            } else {
+                spdlog::warn("Consensus stage failed: {} -- keeping last run as fallback", resp2.error);
+            }
+        }
+    } else {
+        // N=1: single review (original behaviour)
+        resp = gw.chat(system_prompt, user_prompt);
+        total_attempts = resp.attempts;
+        if (resp.ok) {
+            spdlog::info("LLM ok after {} attempt(s), {} chars",
+                         resp.attempts, resp.content.size());
         } else {
-            spdlog::warn("Consensus stage failed: {} -- keeping last run as fallback",
-                         resp2.error);
+            spdlog::error("LLM failed after {} attempt(s): {}", resp.attempts, resp.error);
         }
     }
 
-    // --- Self-Critique stage: optional second-pass audit on the final report ---
+    // --- Self-Critique stage ---
     bool self_critique_used = false;
     if (self_critique && resp.ok) {
         spdlog::info("Self-Critique enabled: running second-pass audit ...");
         aipr::gateway::LLMConfig cfg3 = cfg;
-        cfg3.temperature = 0.2; // critique should be deterministic
+        cfg3.temperature = 0.2;
         aipr::gateway::LLMGateway gw3(cfg3);
         const std::string critique_sys  = aipr::prompt::critique_system_prompt();
         const std::string critique_user =
@@ -413,18 +344,18 @@ int main(int argc, char** argv) {
     resp.attempts = total_attempts;
 
     const auto t1 = std::chrono::steady_clock::now();
-    const auto elapsed =
-        std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
 
     if (resp.ok) {
         spdlog::info("Final review ready in {} ms, total {} attempt(s), {} chars",
                      elapsed.count(), resp.attempts, resp.content.size());
     } else {
-        spdlog::error("LLM failed after {} attempt(s): {}",
-                      resp.attempts, resp.error);
+        spdlog::error("LLM failed after {} attempt(s): {}", resp.attempts, resp.error);
     }
 
-    const std::string report = render_report(*pr, consensus_n, resp, model, elapsed, persona, self_critique_used);
+    // --- Render & write report ---
+    const std::string report = aipr::pipeline::render_report(
+        *pr, consensus_n, resp, model, elapsed, persona, self_critique_used);
 
     try {
         std::filesystem::path out(output_path);
@@ -453,16 +384,10 @@ int main(int argc, char** argv) {
             spdlog::error("--upload-kodo set, but QINIU_AK / QINIU_SK / QINIU_BUCKET "
                           "not all present in env -- skipping upload");
         } else {
-            const auto cfg = aipr::storage::KodoClient::from_env();
-            aipr::storage::KodoClient kc(cfg);
+            const auto kcfg = aipr::storage::KodoClient::from_env();
+            aipr::storage::KodoClient kc(kcfg);
 
-            // key = <prefix>/<owner>-<repo>-PR<n>-<UTC timestamp>.md
-            const std::time_t now_t = std::time(nullptr);
-            std::tm tm{};
-            gmtime_r(&now_t, &tm);
-            char ts[32] = {0};
-            std::strftime(ts, sizeof(ts), "%Y%m%d-%H%M%S", &tm);
-
+            const std::string ts = aipr::common::utc_stamp();
             std::ostringstream key_oss;
             key_oss << kodo_prefix << "/" << pr->locator.owner << "-"
                     << pr->locator.repo << "-PR" << pr->locator.number
@@ -470,36 +395,27 @@ int main(int argc, char** argv) {
             const std::string key = key_oss.str();
 
             spdlog::info("KODO: uploading report to bucket='{}' key='{}'",
-                         cfg.bucket, key);
+                         kcfg.bucket, key);
             const auto kr = kc.upload(key, report);
             if (kr.ok) {
                 std::cout << "\n=== KODO UPLOAD ===\n"
-                          << "Bucket : " << cfg.bucket << "\n"
+                          << "Bucket : " << kcfg.bucket << "\n"
                           << "Key    : " << kr.key    << "\n"
                           << "Hash   : " << kr.hash   << "\n";
                 if (!kr.url.empty()) {
                     std::cout << "URL    : " << kr.url << "\n";
-                    // View URL = viewer base + ?url=<encoded raw url>
-                    if (!kodo_viewer_base.empty()) {
-                        auto url_encode = [](const std::string& s) {
-                            std::ostringstream o;
-                            o << std::hex << std::uppercase << std::setfill('0');
-                            for (unsigned char c : s) {
-                                if (std::isalnum(c) || c == '-' || c == '_' ||
-                                    c == '.' || c == '~') {
-                                    o << static_cast<char>(c);
-                                } else {
-                                    o << '%' << std::setw(2)
-                                      << static_cast<int>(c);
-                                }
-                            }
-                            return o.str();
-                        };
-                        std::cout << "View   : " << kodo_viewer_base
-                                  << "?url=" << url_encode(kr.url) << "\n";
-                    }
                 }
                 std::cout << "=== END KODO UPLOAD ===\n";
+
+                if (!kr.url.empty()) {
+                    std::ofstream afs(output_path, std::ios::app | std::ios::binary);
+                    if (afs) {
+                        afs << "\n---\n"
+                            << "📦 **报告已上传至七牛云 KODO**\n\n"
+                            << "- 📥 [直接下载](" << kr.url << ")\n"
+                            << "- ☁️ [跳转 KODO 空间](https://portal.qiniu.com/kodo/bucket/resource-v2?bucketName=" << kcfg.bucket << ")\n";
+                    }
+                }
             } else {
                 spdlog::error("KODO upload failed: {}", kr.error);
             }

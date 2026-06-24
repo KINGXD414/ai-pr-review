@@ -37,6 +37,10 @@ EXEC_TIMEOUT_SEC    = int(os.environ.get("EXEC_TIMEOUT_SEC",    "60"))
 CACHE_TTL_SEC       = int(os.environ.get("CACHE_TTL_SEC",       "1800"))
 PORT                = int(os.environ.get("PORT",                "8000"))
 
+# ── KODO 上传配置 ──
+UPLOAD_KODO  = os.environ.get("UPLOAD_KODO",  "0") == "1"
+KODO_PREFIX  = os.environ.get("KODO_PREFIX",  "reviews")
+
 MODE_FLAGS = {
     "baseline":  [],
     "linus":     ["--persona", "linus"],
@@ -158,6 +162,8 @@ class Handler(BaseHTTPRequestHandler):
 
         out_path = f"/tmp/review_{int(time.time()*1000)}_{os.getpid()}.md"
         cmd = [BIN_PATH, "--pr", url, "-o", out_path] + MODE_FLAGS[mode]
+        if UPLOAD_KODO:
+            cmd += ["--upload-kodo", "--kodo-prefix", KODO_PREFIX]
 
         start = time.time()
         try:
@@ -199,6 +205,20 @@ class Handler(BaseHTTPRequestHandler):
             "pr": pr,
             "mode": mode,
         }
+
+        # 解析 C++ binary stdout 里的 === KODO UPLOAD === 块
+        kodo_m = re.search(
+            r"=== KODO UPLOAD ===\s*\n(.*?)\n\s*=== END KODO UPLOAD ===",
+            r.stdout, re.DOTALL,
+        )
+        if kodo_m:
+            kodo_info = {}
+            for line in kodo_m.group(1).strip().split("\n"):
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    kodo_info[k.strip().lower()] = v.strip()
+            if kodo_info:
+                result["kodo"] = kodo_info
         cache_set(cache_key, result)
         self._send_json(200, {"success": True, "cached": False, **result})
 

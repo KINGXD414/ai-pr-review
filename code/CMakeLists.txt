@@ -123,6 +123,8 @@ add_library(ai_pr_review_core STATIC
     src/rules/engine.cpp
     src/eval/runner.cpp
     src/storage/kodo_client.cpp
+    src/pipeline/prompt_builder.cpp
+    src/pipeline/report_renderer.cpp
 )
 
 target_include_directories(ai_pr_review_core PUBLIC

@@ -8,7 +8,9 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
+#include <chrono>
 #include <regex>
+#include <thread>
 #include <utility>
 
 namespace aipr::github {
@@ -43,11 +45,6 @@ APIClient::APIClient(std::string token, std::string user_agent)
     : token_(std::move(token)), user_agent_(std::move(user_agent)) {}
 
 std::optional<std::string> APIClient::get(const std::string& path) {
-    httplib::SSLClient cli(kHost, 443);
-    cli.set_connection_timeout(10);
-    cli.set_read_timeout(30);
-    cli.set_follow_location(true);
-
     httplib::Headers headers = {
         {"User-Agent",           user_agent_},
         {"Accept",               "application/vnd.github+json"},
@@ -57,21 +54,57 @@ std::optional<std::string> APIClient::get(const std::string& path) {
         headers.emplace("Authorization", "Bearer " + token_);
     }
 
-    auto res = cli.Get(path.c_str(), headers);
-    if (!res) {
-        spdlog::error("GitHub GET {} failed: transport error ({})",
-                      path,
-                      httplib::to_string(res.error()));
-        return std::nullopt;
+    constexpr int kMaxRetries = 3;
+    for (int attempt = 1; attempt <= kMaxRetries; ++attempt) {
+        httplib::SSLClient cli(kHost, 443);
+        cli.set_connection_timeout(10);
+        cli.set_read_timeout(30);
+        cli.set_follow_location(true);
+
+        auto res = cli.Get(path.c_str(), headers);
+
+        if (!res) {
+            auto err = httplib::to_string(res.error());
+            spdlog::warn("GitHub GET {} attempt {}/{} failed: transport error ({})",
+                         path, attempt, kMaxRetries, err);
+            if (attempt < kMaxRetries) {
+                std::this_thread::sleep_for(std::chrono::seconds(attempt));
+            }
+            continue;
+        }
+
+        // 5xx: server error — retryable
+        if (res->status >= 500 && res->status < 600) {
+            spdlog::warn("GitHub GET {} attempt {}/{} got HTTP {} — retrying",
+                         path, attempt, kMaxRetries, res->status);
+            if (attempt < kMaxRetries) {
+                std::this_thread::sleep_for(std::chrono::seconds(attempt * 2));
+            }
+            continue;
+        }
+
+        // 403 with rate-limit header: retry after specified delay
+        if (res->status == 403) {
+            auto it = res->headers.find("Retry-After");
+            if (it != res->headers.end()) {
+                spdlog::warn("GitHub rate-limited on {}. Retry-After: {}s",
+                             path, it->second);
+                // Don't retry on rate-limit — we'd just burn more quota.
+            }
+        }
+
+        if (res->status != 200) {
+            // 4xx (except 403 w/ Retry-After) — permanent error, do not retry.
+            spdlog::error("GitHub GET {} returned HTTP {}: {}",
+                          path, res->status, res->body.substr(0, 200));
+            return std::nullopt;
+        }
+
+        return res->body;
     }
-    if (res->status != 200) {
-        spdlog::error("GitHub GET {} returned HTTP {}: {}",
-                      path,
-                      res->status,
-                      res->body.substr(0, 200));
-        return std::nullopt;
-    }
-    return res->body;
+
+    spdlog::error("GitHub GET {} exhausted {} retries", path, kMaxRetries);
+    return std::nullopt;
 }
 
 std::optional<PullRequest> APIClient::fetch_pull_request(const PRLocator& loc) {

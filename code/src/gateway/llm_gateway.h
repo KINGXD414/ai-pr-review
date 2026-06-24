@@ -30,6 +30,10 @@ struct LLMConfig {
     int         timeout_seconds = 30;
     int         max_retries     = 3;
     double      temperature     = 0.2;                ///< Lower => more deterministic.
+
+    // Cache settings (P1-2: avoids duplicate API calls for identical inputs).
+    std::string cache_dir;            ///< Empty => cache disabled.  Suggested: ~/.cache/ai-pr-review/
+    int         cache_ttl_seconds = 3600;  ///< Entries older than this are ignored.
 };
 
 /// Result envelope for the non-streaming call.
