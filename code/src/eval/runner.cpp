@@ -145,6 +145,11 @@ CaseResult run_one_case(const CaseSpec& spec, const RunOptions& opts) {
     if (!opts.llm_key.empty()) {
         cmd << " --llm-key " << shell_quote(opts.llm_key);
     }
+    // Forwarded verbatim so the harness can evaluate any config
+    // (--persona / --self-critique / --consensus / --agent / --rag / --embed ...).
+    for (const auto& arg : opts.extra_args) {
+        cmd << " " << shell_quote(arg);
+    }
     // Silence binary output; the harness emits its own progress logs.
     cmd << " > /dev/null 2>&1";
 

@@ -64,6 +64,10 @@ struct RunOptions {
     std::string llm_key;        ///< forwarded to ai-pr-review
     std::string model;          ///< LLM model name
     bool dry_run{false};        ///< skip actual binary invocation
+    /// Extra CLI arguments forwarded verbatim to `ai-pr-review`
+    /// (e.g. {"--persona", "linus"} / {"--agent"} / {"--rag", "--embed"}).
+    /// Lets the harness run a real config matrix instead of baseline only.
+    std::vector<std::string> extra_args;
 };
 
 /// Parse the JSON file and return a list of cases.

@@ -49,6 +49,16 @@ int main(int argc, char** argv) {
     std::string llm_key;
     bool verbose = false;
     bool dry_run = false;
+    // --- Config-under-test switches, forwarded to ai-pr-review -------------
+    // These make the harness able to run a real matrix (baseline / +persona /
+    // +self-critique / +consensus / +agent / +rag ...) instead of baseline only.
+    std::string persona;
+    bool self_critique = false;
+    int  consensus_n   = 1;
+    bool use_agent     = false;
+    bool use_rag       = false;
+    bool use_embed     = false;
+    std::vector<std::string> raw_args;   // escape hatch: forwarded verbatim
 
     app.add_option("--cases", cases_file, "Path to cases JSON")
         ->capture_default_str();
@@ -68,6 +78,23 @@ int main(int argc, char** argv) {
     app.add_flag("--dry-run", dry_run,
                  "Do not invoke the binary; verify pipeline only");
     app.add_flag("-v,--verbose", verbose, "Enable debug logs");
+
+    // Config-under-test switches (forwarded verbatim to ai-pr-review).
+    app.add_option("--persona", persona,
+                   "Reviewer persona under test: default | linus | mentor | devil | zen");
+    app.add_flag("--self-critique", self_critique,
+                 "Evaluate the two-pass self-critique config");
+    app.add_option("--consensus", consensus_n,
+                   "Evaluate N-vote consensus (N in [1,5])")
+        ->check(CLI::Range(1, 5));
+    app.add_flag("--agent", use_agent,
+                 "Evaluate the Function-Calling agentic loop config");
+    app.add_flag("--rag", use_rag,
+                 "Evaluate with RAG retrieval enabled");
+    app.add_flag("--embed", use_embed,
+                 "With --rag: use the semantic (embedding) path instead of BM25");
+    app.add_option("--extra-arg", raw_args,
+                   "Raw argument forwarded verbatim to ai-pr-review (repeatable)");
     CLI11_PARSE(app, argc, argv);
 
     spdlog::set_level(verbose ? spdlog::level::debug : spdlog::level::info);
@@ -96,6 +123,26 @@ int main(int argc, char** argv) {
     opts.llm_key = llm_key;
     opts.model = model;
     opts.dry_run = dry_run;
+
+    // Translate the config switches into verbatim CLI arguments. Order matters
+    // only for readability of the generated command; ai-pr-review handles any
+    // order.
+    std::vector<std::string> fwd = raw_args;
+    if (!persona.empty()) { fwd.push_back("--persona"); fwd.push_back(persona); }
+    if (self_critique)     { fwd.push_back("--self-critique"); }
+    if (consensus_n > 1)   { fwd.push_back("--consensus");
+                             fwd.push_back(std::to_string(consensus_n)); }
+    if (use_agent)         { fwd.push_back("--agent"); }
+    if (use_rag)           { fwd.push_back("--rag"); }
+    if (use_embed)         { fwd.push_back("--embed"); }
+    opts.extra_args = fwd;
+    if (!fwd.empty()) {
+        std::string shown;
+        for (const auto& a : fwd) { shown += a + " "; }
+        spdlog::info("Config under test: ai-pr-review {}", shown);
+    } else {
+        spdlog::info("Config under test: baseline (no extra flags)");
+    }
 
     std::vector<aipr::eval::CaseSpec> specs;
     try {
