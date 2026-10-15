@@ -73,10 +73,35 @@ include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
 # ---------------------------------------------------------------------------
+# Local dependency override (third_party/) — build fully OFFLINE.
+# Drop cpp-httplib / CLI11 / googletest sources into code/third_party/<dir>/
+# and FetchContent uses them as-is, skipping all network access. Useful behind
+# the GFW where GitHub / mirrors are unreachable or DNS-polluted.
+# NOTE: FETCHCONTENT_SOURCE_DIR_<NAME> is case-sensitive — the suffix must be
+# the UPPERCASE form of the FetchContent_Declare() name below.
+# ---------------------------------------------------------------------------
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cpp-httplib/CMakeLists.txt")
+    message(STATUS "Using local dependency: third_party/cpp-httplib (offline)")
+    set(FETCHCONTENT_SOURCE_DIR_HTTPPLIB
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cpp-httplib")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/CLI11/CMakeLists.txt")
+    message(STATUS "Using local dependency: third_party/CLI11 (offline)")
+    set(FETCHCONTENT_SOURCE_DIR_CLI11
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/CLI11")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/googletest/CMakeLists.txt")
+    message(STATUS "Using local dependency: third_party/googletest (offline)")
+    set(FETCHCONTENT_SOURCE_DIR_GOOGLETEST
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/googletest")
+endif()
+
+# ---------------------------------------------------------------------------
 # GitHub mirror switch (for users behind GFW)
 # ---------------------------------------------------------------------------
 # Override at configure time:
 #   cmake -B build -DGITHUB_MIRROR=https://kkgithub.com
+# Not needed when third_party/ local overrides above are in place.
 set(GITHUB_MIRROR "https://github.com"
     CACHE STRING "Mirror used for FetchContent GitHub clones (e.g. https://kkgithub.com)")
 message(STATUS "Using GitHub mirror: ${GITHUB_MIRROR}")
@@ -121,10 +146,13 @@ add_library(ai_pr_review_core STATIC
     src/gateway/llm_gateway.cpp
     src/analyzer/ast_analyzer.cpp
     src/rules/engine.cpp
+    src/rag/retriever.cpp
+    src/rag/embedder.cpp
+    src/rag/vector_store.cpp
+    src/prompt/skills.cpp
+    src/agent/agent.cpp
     src/eval/runner.cpp
     src/storage/kodo_client.cpp
-    src/pipeline/prompt_builder.cpp
-    src/pipeline/report_renderer.cpp
 )
 
 target_include_directories(ai_pr_review_core PUBLIC
@@ -186,6 +214,39 @@ target_link_libraries(rule_engine_tests PRIVATE
     GTest::gtest_main
 )
 add_test(NAME rule_engine_tests COMMAND rule_engine_tests)
+
+# RAG retriever test — pure standard library, also buildable standalone with
+# `g++ -std=c++17 -Isrc tests/test_rag.cpp src/rag/retriever.cpp -o test_rag`.
+add_executable(rag_retriever_tests tests/test_rag.cpp
+    src/rag/retriever.cpp
+    src/rag/embedder.cpp
+    src/rag/vector_store.cpp)
+target_include_directories(rag_retriever_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(rag_retriever_tests PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME rag_retriever_tests COMMAND rag_retriever_tests)
+
+# Agent loop (Function-Calling) test — drives run_agent() with a MockGateway
+# (no network, no libclang call at runtime). Links the real core (incl. the
+# real AST analyzer) so the static symbols resolve. NOTE: this test has its
+# own main(), so it must NOT link GTest::gtest_main.
+add_executable(agent_loop_tests tests/test_agent_mock.cpp)
+target_link_libraries(agent_loop_tests PRIVATE ai_pr_review_core)
+add_test(NAME agent_loop_tests COMMAND agent_loop_tests)
+
+# Embedder + VectorStore (offline RAG building blocks) — pure standard library.
+add_executable(rag_embedder_tests tests/test_vector_store.cpp
+    src/rag/embedder.cpp
+    src/rag/vector_store.cpp)
+target_include_directories(rag_embedder_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(rag_embedder_tests PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME rag_embedder_tests COMMAND rag_embedder_tests)
+
+# Skill registry — wraps persona / self_critique / consensus as Skills.
+# (prompt/*.h are header-only, so only skills.cpp is compiled here.)
+add_executable(skills_tests tests/test_skills.cpp
+    src/prompt/skills.cpp)
+target_include_directories(skills_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+add_test(NAME skills_tests COMMAND skills_tests)
 
 # ---------------------------------------------------------------------------
 # Evaluation harness binary (Day 3)

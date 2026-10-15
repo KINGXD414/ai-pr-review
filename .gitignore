@@ -1,5 +1,7 @@
 code/build/
 code/_build_skip/
+code/third_party/
+code/stubs/
 *.o
 *.a
 .vscode/
