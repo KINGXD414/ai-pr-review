@@ -739,6 +739,67 @@ export GITHUB_TOKEN="ghp_xxxxxxxx"
 - ~~"改 `pipeline/prompt_builder.h`"~~ → 该文件不存在，`build_user_prompt` 实际在 `main.cpp`
 - ~~"规则引擎接入列为未来项"~~ → 这恰是最高价值的 P0 修复：README 曾宣称三层架构但 `main.cpp` 从未把 RuleHit 喂给 LLM，v0.3.0 已修复（主流程始终运行规则引擎并注入命中结果）
 
+## 迭代历程（v0.3.0 改造全过程）
+
+记录从"对照 JD 找缺口"到"真实环境验证通过"的完整过程 —— 包括中途发现的真实缺陷。
+过程比结果更有信息量，其中**两次"模块单测绿、但集成后失效"**是本项目最值钱的教训。
+
+### 阶段一：评估（先确认缺口，不急着写代码）
+
+对照 JD 逐条核对，结论是命中约五成：
+
+- 已有强项：C++ pipeline、Prompt 三招 + 5×4 评测矩阵、CI self-reviewing workflow
+- 四个缺口：Function Calling / Agent 循环、RAG / Embedding / 向量库、MCP / Skills、移动端
+- **一处硬伤（P0）**：README 宣称"规则引擎 → AST → LLM"三层架构，但 `main.cpp` 从未 include `rules/engine.h`，RuleHit 从未进入 LLM prompt —— 规则引擎是个跑不到的孤岛
+
+### 阶段二：补齐实现（约束：不破坏任何已有功能）
+
+在**已验证代码之上增量改造**，而非推倒重来：新增 `agent/`、`rag/`、`prompt/skills`、`mcp/server.py`，
+并在 `main.cpp` 接通规则引擎与全部新开关。原有三招（persona / self-critique / consensus）与评测数据完整保留。
+
+### 阶段三：离线验证（受限环境下的取舍）
+
+开发环境缺 libclang / OpenSSL / 网络，于是用 stub 头 + 本地编译器做离线校验（4 个测试全绿）。
+期间踩到一个坑：**最初的 JSON stub 里 `parse()` 永远返回空对象，导致向量库 save/load 往返测试"假过"**。
+随后把 stub 升级为小型真实实现（递归下降 parser + dump）——**测试环境若与真实行为不一致，绿灯没有意义**。
+
+### 阶段四：真实环境验证（WSL Ubuntu 22.04 / GCC 11.4 / libclang-14）
+
+| 验证项 | 结果 |
+|---|---|
+| 构建 | 100%，`-Wall -Wextra` 零警告 |
+| `ctest` | **7/7 全过** |
+| 真实 LLM 端到端 | muduo#705 / spdlog#3594 / muduo#505，报告质量达人工标注水准 |
+| RAG 三档 | BM25 → 语义（`--embed`）→ 索引落盘加载（`--index`，30KB JSON / 7 条向量） |
+| Agent 自主调用 | 4~5 轮，动用全部工具类型（含 `list_skills` → `select_skill` 自主选策略） |
+| MCP 协议 | `initialize` + `tools/list` 返回完整 4 工具 schema |
+
+> 依赖侧：GitHub 与镜像在受限网络下不可靠，改为把三个依赖 vendored 到 `code/third_party/`
+> （cpp-httplib v0.14.3 / CLI11 v2.4.1 / googletest v1.14.0），CMake 检测到即跳过网络克隆，构建可完全离线。
+
+### 阶段五：集成才暴露的真实缺陷（最有价值的部分）
+
+单元测试全绿**不等于**功能生效。以下 6 个缺陷中，前两个性质相同且最严重：
+
+| # | 缺陷 | 表现 | 修复 |
+|---|---|---|---|
+| 1 | **规则引擎未接入主流程** | 模块单测绿，但 `main.cpp` 从未调用它，三层架构名存实亡 | 主流程始终运行 `RuleEngine`，命中结果注入 prompt（`-v` 可见） |
+| 2 | **Agent 结果被后续代码覆盖** | Stage-1 单发 `chat()` 循环缺 `!use_agent` 守卫，`resp = std::move(r)` 把模型多轮工具调用的产出整个替换掉，Agent 实际未生效还多花一次调用；`attempts` 也被覆写为 1 | 补两处守卫。实测：attempts 1→3、报告 2054→3041 字符、耗时 13.7s→10.8s |
+| 3 | CMake 目标误链 `gtest_main` | `agent_loop_tests` 自带 `main()`，与 `gtest_main` 符号冲突 | 去掉该链接 |
+| 4 | CMake 缺源文件 | `rag_retriever_tests` 未编译 embedder / vector_store，链接缺符号 | 补齐源与 `nlohmann_json` 链接 |
+| 5 | `FETCHCONTENT_SOURCE_DIR_*` 大小写 | 变量名后缀必须**大写**，小写会被 FetchContent 静默忽略（仍走网络克隆） | 改为显式大写常量并加注释 |
+| 6 | 文件级规则行号渲染成 `:0` | 报告中显示无意义的 `file.cc:0` | `line == 0` 时渲染为 `(file-level)` |
+
+**可复用教训**：
+① 对着实现验证文档，别假设文档是对的；② mock 测试能证明循环逻辑正确，但**证明不了主流程接线**；
+③ 测试环境与真实环境行为不一致时，绿灯没有意义；④ 抽象边界先立住，再按瓶颈替换实现。
+
+### 阶段六：沉淀
+
+- `docs/interview_talking_points.md`：面试问答稿，含**诚实边界**（会被追问的弱项及应对）
+- `demo/`：v0.2.0 两份 + v0.3.0 两份真实产出，形成版本对比
+- 提交历史按语义拆分为 8 个 commit（rag / skills / agent / mcp / pipeline / build / docs / chore）
+
 ## 未来扩展
 
 - 增量 AST 缓存：对大型仓库，缓存上次 AST 索引，仅重新解析变更文件
