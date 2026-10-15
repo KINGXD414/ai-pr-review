@@ -4,18 +4,18 @@
 
 ## Demo 视频 & 在线演示
 
-> [B 站演示视频](https://b23.tv/aGOnRzy) · [🌐 在线交互式演示](https://kingxd414.github.io/ai-pr-review/)（GitHub Pages，2026-06-01 00:00 仓库公开后生效）
+> [B 站演示视频（10 分钟）](https://www.bilibili.com/video/TODO_REPLACE_BEFORE_DEADLINE) · [🌐 在线交互式演示](https://kingxd414.github.io/ai-pr-review/)
 
 **两种体验方式**：
 
-- **B 站视频**：完整剧本演示，含 OOM 钩子开场 + 4 种审查模式对比 + 真在线 review demo + 5×4 评测矩阵与工程化决策 + 自审 PR 演示
-- **在线演示页**（GitHub Pages，2026-06-01 00:00 仓库公开后生效）：
-  - **8 份预生成报告即时切换查看**（muduo PR #729 / #505、nlohmann/json #5187、自审 PR #26 等）——纯前端无后端依赖，clone 后开 Pages 即用
-  - **4 种审查模式可对比**：Baseline / Persona·Linus / Self-Critique / Consensus 3
-  - **真在线 AI 审查**（输入 PR URL → 实时跑 → 渲染 Markdown）需要后端服务，作者本地后端开启期间可用；白名单 repo：muduo / json / spdlog / fmt / abseil / 本项目（防 DeepSeek API key 被刷）
-  - 想自己跑真在线审查：clone 后按 [`backend/README.md`](backend/README.md) 起本地 backend，再把 `docs/config.js` 里 `API_BASE` 指向自己后端地址即可
+- **B 站视频**：10 分钟完整剧本演示，含自审 demo + 5×4 评测矩阵 + 工程化决策
+- **在线演示页**（GitHub Pages）：输入 GitHub PR URL → 实时跑 AI 审查 → 渲染 Markdown 报告
+  - 4 种审查模式可切换：Baseline / Persona·Linus / Self-Critique / Consensus 3
+  - 8 份预生成报告即时返回（muduo PR #729 / #505、nlohmann/json #5187、自审 PR #26）
+  - 在线审查白名单：muduo / json / spdlog / fmt / abseil / 本项目（防 API 滥用）
+  - 后端开窗期间可输任意白名单 PR 实时审查
 
-> 视频链接将在录制上传完成后更新到上方占位。
+> 视频链接将在 2026-05-31 23:00 前更新为最终录制版本。
 
 ## 项目亮点速览
 
@@ -65,6 +65,11 @@ GitHub PR
   结构化审查报告 (RuleHit[])
 ```
 
+> **v0.3.0 新增（贴合 JD 的 Agent / RAG / MCP 要求）**：在三层架构之上叠加了两个能力，并修复了一个 P0 集成缺陷 ——
+> - **Agent 编排层（`--agent`）**：把"调哪些工具、以什么顺序"从写死的 pipeline 升级为 LLM 自主决策的 **Function Calling** 循环（规则引擎 / AST / RAG / 评论草稿 四个 tool），循环上限由 `--agent-max-iter` 约束，绝不空转。
+> - **RAG 检索增强（`--rag`）**：内置 8 条规则知识库 + 可选 `--rag-corpus-dir` 语料，BM25 检索 top-k 片段注入 prompt；并预留 embedding 余弦检索接口，可平滑升级到向量数据库。
+> - **P0 修复**：此前 README 描述的三层架构中，**规则引擎从未真正接入 `main.cpp`**（无 `#include "rules/engine.h"`、RuleHit 也未进入 prompt）。现已让 `main` 始终运行 `RuleEngine().run(parsed_diff)` 并把命中渲染进 prompt，三层架构才名副其实。
+
 ### 上下文获取方式
 
 | 层级 | 输入来源 | 获取方式 |
@@ -102,6 +107,34 @@ GitHub PR
 ### LLM 网关（LLM Gateway）
 - 模型：DeepSeek-V3——中文代码审查场景下表现稳定，API 成本远低于 GPT-4 级模型，适合实时交互
 - 可配置 prompt 模板，支持规则命中结果和 AST 上下文注入
+
+### Agentic 审查循环（Function Calling / `--agent`）
+
+把原本"fetch → prompt → 一次 LLM 调用"的写死 pipeline，升级为真正的 **Agent**：给模型一组 **tool**，由模型自己决定每轮调用哪个、以什么顺序，循环直到产出最终结论。这正是该岗位 JD 中"业务 Agent / Function Calling"的核心考查点 —— workflow 与 Agent 的区别。
+
+- 暴露给模型的 tool：`run_rule_engine`（static 规则）、`analyze_ast`（libclang 跨文件分析，需 `--source-dir`）、`rag_query`（检索编码规范 / 历史审查，需 `--rag`；有 embedding 时自动走语义余弦）、`list_skills` / `select_skill`（Skill 注册表，见下节）、`draft_comment`（落盘最终评论）
+- OpenAI 兼容的 `tools` 协议：`chat_with_tools` 发送消息历史 + tools，解析 `tool_calls`，执行后把结果作为 `tool` 消息回灌，多轮循环
+- 有界且确定性：循环上限 `--agent-max-iter`（默认 6，范围 1–12），temperature 固定，绝不无限自旋
+- Agent 模式下跳过固定的 consensus / self-critique 后处理（Agent 自身已多轮迭代）
+
+### RAG 检索增强（`--rag` / `--rag-corpus-dir` / `--embed` / `--index`）
+
+轻量级 RAG 检索引擎（纯标准库，无外部向量库、无网络），**两条检索路径共享同一个 `Retriever` 接口**：
+
+- **BM25 检索（默认，零依赖）**：对编码规范 + 历史审查报告语料建索引，返回 top-k 最相关片段注入 prompt；CJK 文本按标点 / 空白切词，毫秒级建库。断网、无密钥也能完整演示
+- **语义检索（`--embed`）**：`Embedder` 接口 + 离线 `HashingEmbedder`（字符 n-gram 哈希向量，L2 归一化，**确定性、零依赖、断网可跑**）把文档与查询嵌入向量空间，经 `VectorStore` 接口做余弦检索；默认实现 `BruteForceStore` 为内存暴力余弦
+- **向量索引落盘（`--index <path.json>`）**：`BruteForceStore` 支持 `save/load` JSON —— 这就是一个**真实的向量数据库 artifact**（id + vector + text），可复现"离线建库 → 加载 → 检索"的完整 RAG 生命周期
+- **实现可替换缝**：`Embedder` / `VectorStore` 都是抽象接口 —— 换远端 Embedding（如 siliconflow bge-m3）只需实现一个 `RemoteEmbedder`；换 ANN 索引（hnswlib / faiss）只需实现一个 `HnswStore`，**调用方零改动**。面试话术：先用暴力余弦打通正确性，再按数据规模换 ANN
+- `--rag-corpus-dir` 可挂接团队自己的 `.md` / `.txt` 规范文档，与内置 8 条规则知识库合并索引
+- 非 Agent 模式下，`--rag` 也会用 PR 标题做伪查询，把相关片段注入 prompt
+
+### Skills 体系（`--list-skills` / Agent `select_skill`）
+
+把原有 prompt 策略薄封装为**可组合的 Skill 注册表**（`src/prompt/skills.h`），使 JD 的 "Skill" 概念一等公民化，且**不重复任何 prompt 逻辑**：
+
+- 7 个内置 Skill：5 种 persona（`default` / `linus` / `mentor` / `devil` / `zen`）+ 2 个元策略（`self_critique` / `consensus`），每个 Skill = id + 名称 + 描述 + 落地 prompt 片段
+- CLI `--list-skills`：离线打印 Skill 清单（Markdown），无密钥即可演示
+- Agent 模式新增两个 tool：`list_skills`（列出可用 Skill）、`select_skill`（按 id 选择审查策略），与 `run_rule_engine` / `analyze_ast` / `rag_query` / `draft_comment` 并列
 
 ### 评测框架（ai-pr-eval）
 
@@ -162,7 +195,7 @@ GitHub PR
 ./ai-pr-review --repo owner/repo --pr 123 --consensus 3
 ```
 
-> 三招互斥使用。v0.2.0 实测：persona-linus 综合 87%（最佳），baseline 82%，self-critique 80%，consensus-3 82%（零增益但 3x 开销）。完整 5×4 矩阵见 `code/eval/comparison_report.md`。
+> 三招（`--persona` / `--self-critique` / `--consensus`）互斥使用。v0.2.0 实测：persona-linus 综合 87%（最佳），baseline 82%，self-critique 80%，consensus-3 82%（零增益但 3x 开销）。完整 5×4 矩阵见 `code/eval/comparison_report.md`。`--agent` 与 `--rag` 与上述三招**正交**，可叠加（如 `--agent --rag`）。
 
 
 
@@ -315,6 +348,24 @@ export DEEPSEEK_API_KEY=your_api_key
 # Consensus 多次投票（N=3，提升置信度）
 ./ai-pr-review --repo owner/repo --pr 123 --consensus 3
 
+# Agent 模式：让模型自主调用 规则/AST/RAG 工具（Function Calling 循环）
+./ai-pr-review --repo owner/repo --pr 123 --agent
+
+# Agent 模式 + RAG：检索团队编码规范辅助审查
+./ai-pr-review --repo owner/repo --pr 123 --agent --rag --rag-corpus-dir ./team-rules
+
+# 纯 RAG 注入（非 Agent）：把相关规范片段塞进 prompt
+./ai-pr-review --repo owner/repo --pr 123 --rag --rag-corpus-dir ./team-rules
+
+# RAG 语义路径：HashingEmbedder 嵌入 + 向量余弦检索（断网可跑）
+./ai-pr-review --repo owner/repo --pr 123 --rag --embed
+
+# 语义路径 + 向量索引落盘：首次构建并保存，之后直接加载
+./ai-pr-review --repo owner/repo --pr 123 --rag --embed --index ./team.index.json
+
+# 查看可用 Skills（离线，无需 API Key）
+./ai-pr-review --list-skills
+
 # 输出保存到 ./review_<repo>_<pr>.md
 ```
 
@@ -335,6 +386,42 @@ cd code/build
 
 输出：每条 case 的三维度得分 + 总评分 + JSON 详情。
 
+## MCP 服务（Model Context Protocol）
+
+为贴合 JD 中 "MCP / Skills" 要求，项目附带一个**纯 Python 标准库（无第三方依赖）**的 MCP server（`mcp/server.py`），通过 stdio JSON-RPC 暴露本工具的审查能力，可被 Claude Code / Cursor / 任意 MCP 客户端以 `mcp` 协议调用。
+
+### 暴露的 tool
+
+| tool | 说明 |
+|------|------|
+| `review_pr` | 对指定 PR 跑完整审查（支持 `agent` / `rag` / `embed` / `index` / `rag_corpus_dir` / `persona` / `source_dir` 透传） |
+| `list_rules` | 列出内置 8 条静态规则及其严重度 |
+| `list_skills` | 列出 7 个审查 Skill（persona + 元策略），调 `--list-skills`，无网络 |
+| `run_eval`   | 触发本地评测脚本 |
+
+### 启动（stdio 模式）
+
+```bash
+python3 mcp/server.py
+```
+
+### 接入 Claude Code / Cursor
+
+在客户端的 MCP 配置中加入（stdio 启动命令指向 `mcp/server.py`）：
+
+```json
+{
+  "mcpServers": {
+    "ai-pr-review": {
+      "command": "python3",
+      "args": ["/绝对路径/AI_PR_Review/mcp/server.py"]
+    }
+  }
+}
+```
+
+接入后，模型即可在对话中直接调用 `review_pr` 等 tool，把"代码审查"变成它能力集里的一个 **Skill** —— 这正是 Agent + MCP + Skill 三件套的落点。
+
 ## 项目结构
 
 ```
@@ -342,7 +429,7 @@ ai-pr-review/
 ├── code/
 │   ├── CMakeLists.txt          # 主构建配置（FetchContent + apt 双管依赖）
 │   ├── src/
-│   │   ├── main.cpp            # 主 CLI 入口（Pipeline 编排，含三招 flag）
+│   │   ├── main.cpp            # 主 CLI 入口（Pipeline 编排，含三招 / Agent / RAG / Skills flag）
 │   │   ├── eval_main.cpp       # 评测程序 ai-pr-eval 入口
 │   │   ├── rules/              # 规则引擎模块（June）
 │   │   │   ├── engine.h        # RuleHit 结构体 + Engine 接口
@@ -353,11 +440,20 @@ ai-pr-review/
 │   │   │   └── ast_analyzer.cpp
 │   │   ├── diff/               # Diff 解析模块
 │   │   ├── github/             # GitHub API 客户端
-│   │   ├── gateway/            # LLM 网关（DeepSeek）
-│   │   ├── prompt/             # v0.2.0 三招 prompt 模板
+│   │   ├── gateway/            # LLM 网关（DeepSeek，OpenAI 兼容 tools 协议）
+│   │   ├── prompt/             # prompt 策略 + Skill 注册表
 │   │   │   ├── personas.h      # 5 种审查者人设
 │   │   │   ├── self_critique.h # 二审反思 prompt
-│   │   │   └── consensus.h     # 多次投票 meta-review prompt
+│   │   │   ├── consensus.h     # 多次投票 meta-review prompt
+│   │   │   ├── skills.h        # Skill 注册表（persona + 元策略薄封装）
+│   │   │   └── skills.cpp
+│   │   ├── rag/                # RAG 检索增强（v0.3.0）
+│   │   │   ├── retriever.h/.cpp   # 统一检索入口：BM25 / 语义余弦 / search_best
+│   │   │   ├── embedder.h/.cpp    # Embedder 接口 + 离线 HashingEmbedder
+│   │   │   └── vector_store.h/.cpp # VectorStore 接口 + BruteForceStore（JSON 落盘）
+│   │   ├── agent/              # Function-Calling Agent 循环（v0.3.0）
+│   │   │   ├── agent.h
+│   │   │   └── agent.cpp       # tool 目录构建 / 工具执行 / 多轮循环
 │   │   ├── eval/               # 评测程序核心代码（runner.cpp / runner.h）
 │   │   └── storage/            # KODO 上传客户端（kodo_client.h/.cpp）
 │   ├── eval/                   # 评测数据与实测产出
@@ -365,10 +461,16 @@ ai-pr-review/
 │   │   ├── baseline_report.md  # v0.1.0 baseline 实测报告（综合 85%）
 │   │   ├── comparison_report.md # v0.2.0 三招对比矩阵（5×4，已完成）
 │   │   └── runs/               # 各次评测原始输出（runs/<时间戳>/）
-│   └── tests/                  # GTest 单元测试
-│       ├── test_rule_engine.cpp
-│       ├── test_ast_analyzer.cpp
-│       └── ...
+│   └── tests/                  # 单元测试（GTest + 独立 main 两种）
+│       ├── test_rule_engine.cpp      # GTest
+│       ├── test_ast_analyzer.cpp     # GTest
+│       ├── test_diff_parser.cpp      # GTest
+│       ├── test_rag.cpp              # 独立 main：BM25 + 语义路径端到端
+│       ├── test_vector_store.cpp     # 独立 main：Embedder + VectorStore
+│       ├── test_skills.cpp           # 独立 main：Skill 注册表
+│       └── test_agent_mock.cpp       # 独立 main：Agent 循环 mock 端到端
+├── mcp/
+│   └── server.py               # MCP server（纯 Python 标准库，stdio JSON-RPC）
 ├── docs/
 │   ├── DAILY.md                # 每日进度日志
 │   ├── CHANGELOG.md            # 版本变更记录（Keep a Changelog）
@@ -597,12 +699,45 @@ export GITHUB_TOKEN="ghp_xxxxxxxx"
 ### KINGXD414（AST 分析 + 主 Pipeline + 评测框架 + v0.2.0 三招）
 - `code/src/analyzer/`：基于 libclang 的 AST 分析器（含 9 项单元测试）
 - `code/src/diff/` + `code/src/github/` + `code/src/gateway/`：Diff 解析、GitHub API 客户端、DeepSeek LLM 网关
-- `code/src/main.cpp`：CLI Pipeline 编排，支持 `--source-dir` / `--persona` / `--self-critique` / `--consensus`
+- `code/src/main.cpp`：CLI Pipeline 编排，支持 `--source-dir` / `--persona` / `--self-critique` / `--consensus` / `--agent` / `--agent-max-iter` / `--rag` / `--rag-corpus-dir`
 - `code/src/prompt/`：v0.2.0 三招 prompt 模板（personas / self-critique / consensus）
 - `code/src/eval/` + `eval_main.cpp`：评测程序 `ai-pr-eval` 三维度评分实现
 - `code/src/storage/`：KODO 上传客户端（零 SDK，手写 HMAC-SHA1 签名）
 - `code/CMakeLists.txt`：FetchContent + apt 双管依赖构建配置
+- `mcp/server.py`：纯 Python 标准库 MCP server（stdio JSON-RPC），暴露 `review_pr` / `list_rules` / `list_skills` / `run_eval` 四个 tool
 - `demo/muduo_pr705_review.md` + `demo/muduo_pr729_review.md`：真实 PR demo 输出
+
+## v0.3.0 改造：JD 对齐设计决策
+
+本节记录"AI 应用开发工程师（Agent / MCP / Skills 方向）"JD 对齐改造的**设计决策与取舍**，也是面试中讲解"为什么这么做"的参照。
+
+### JD 概念 → 落地映射
+
+| JD 要求 | 落地 | 关键设计决策 |
+|---|---|---|
+| Function Calling / Agent | `agent/agent.cpp`：模型自决每轮调哪个 tool，多轮回灌直到产出结论 | 有界循环（`--agent-max-iter`，默认 6 上限 12）+ 固定 temperature，**绝不无限自旋**；Agent 与 persona/consensus 正交可叠 |
+| RAG / Embedding / 向量库 | `rag/retriever`（BM25 默认）+ `rag/embedder` + `rag/vector_store`（JSON 落盘） | **BM25 作零依赖默认路径**（断网可演示），语义路径用**离线确定性 Embedder**，远端 Embedding / hnswlib 作为可替换实现缝进抽象接口 |
+| MCP / Skills | `mcp/server.py`（纯标准库 stdio JSON-RPC，**真实可跑**）+ `prompt/skills` 注册表 | Skills 是 persona/元策略的**薄封装**（单一事实来源，不重复 prompt 逻辑）；MCP server 直接驱动同一 C++ 二进制，不复制业务逻辑 |
+| Prompt engineering | 5 persona + self-critique + consensus + 5×4 评测矩阵 | 保留 v0.2.0 全部三招与实测数据 |
+
+### 五个关键取舍（面试可直接讲）
+
+> 完整面试问答稿（30 秒电梯介绍、Function Calling / RAG / Skills / MCP 高频问答、以及**可能被追问的弱项应对话术**）见 [`docs/interview_talking_points.md`](docs/interview_talking_points.md)。
+
+1. **为什么默认 BM25 而不是向量检索？** 向量路径需要 embedding 模型或远端 API（密钥 + 网络 + 延迟），演示时有单点故障；BM25 纯标准库、毫秒建库、确定性输出。语义能力通过 `--embed` 开启，两条路径共享同一个 `Retriever::search_best` 入口。
+2. **为什么 Embedder 是接口而不是直接用 bge-m3？** 离线 `HashingEmbedder`（字符 n-gram 哈希 + L2 归一化）保证**任何环境可复现**；换真实模型只需新增一个 `RemoteEmbedder` 实现，调用方零改动 —— 这是"面向接口隔离不确定性"的标准做法。
+3. **为什么向量库用暴力余弦而不是 hnswlib？** 演示语料是千级 chunk，暴力余弦 O(n) 完全够快且**零依赖**；`VectorStore` 接口先立住，数据规模上来后换 `HnswStore` 即可。先保正确性，再按规模换 ANN。
+4. **为什么 Skills 是薄封装而不是重写 prompt 系统？** persona / self_critique / consensus 已经是验证过的资产（87% / 80% / 82% 实测分）。Skill 注册表只做"命名 + 描述 + 索引"，让 Agent 能发现和选择它们，**不复制任何 prompt 内容**。
+5. **为什么 MCP server 是纯 Python 标准库？** 零 pip 依赖意味着任何有 Python3 的机器上 `python3 mcp/server.py` 即可跑；server 只做 JSON-RPC 协议翻译，业务逻辑全部委托给同一个 C++ 二进制，**不会出现两套行为分叉**。
+
+### 对初版改造方案的修正（避坑记录）
+
+- ~~"tool_registry / agent 循环从零实现"~~ → 仓库已有验证过的实现，初版方案照做会造出平行重复模块
+- ~~"远端 Embedding 优先"~~ → 演示雷区（断网即崩），改为离线默认 + 可替换缝
+- ~~"git blame 考古工具"~~ → 范围蔓延，JD 未要求，且多一个 subprocess 依赖
+- ~~"hnswlib 作为必需依赖"~~ → 过重，接口 + 暴力实现足够讲清 ANN 思想
+- ~~"改 `pipeline/prompt_builder.h`"~~ → 该文件不存在，`build_user_prompt` 实际在 `main.cpp`
+- ~~"规则引擎接入列为未来项"~~ → 这恰是最高价值的 P0 修复：README 曾宣称三层架构但 `main.cpp` 从未把 RuleHit 喂给 LLM，v0.3.0 已修复（主流程始终运行规则引擎并注入命中结果）
 
 ## 未来扩展
 
@@ -611,8 +746,9 @@ export GITHUB_TOKEN="ghp_xxxxxxxx"
 - GitHub App 集成：从 CLI 工具升级为 GitHub App，PR 提交自动触发审查
 - VSCode Extension：开发者提交 PR 后侧边栏实时展示审查结果
 - 规则自定义：配置文件定义项目特定规则
-- 规则引擎主集成：当前规则引擎为独立模块（`code/src/rules/`），未来集成至主 Pipeline 第一层
+- ~~规则引擎主集成~~：**v0.3.0 已完成** —— 主流程第一层始终运行规则引擎，RuleHit 注入 prompt
 - SSE 流式输出：当前 DeepSeek 调用为同步阻塞，未来切换至 SSE 流式输出
+- `RemoteEmbedder`（siliconflow bge-m3）与 `HnswStore`（hnswlib）：作为 `Embedder` / `VectorStore` 接口的替换实现，验证抽象接口的可替换性
 - 更多规则：迭代器失效检测、线程安全规则、资源泄漏规则
 - 扩展评测集：cases.json 从 5 条扩至 10-15 条
 
