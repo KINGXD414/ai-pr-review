@@ -19,6 +19,9 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 namespace aipr::gateway {
 
@@ -30,10 +33,6 @@ struct LLMConfig {
     int         timeout_seconds = 30;
     int         max_retries     = 3;
     double      temperature     = 0.2;                ///< Lower => more deterministic.
-
-    // Cache settings (P1-2: avoids duplicate API calls for identical inputs).
-    std::string cache_dir;            ///< Empty => cache disabled.  Suggested: ~/.cache/ai-pr-review/
-    int         cache_ttl_seconds = 3600;  ///< Entries older than this are ignored.
 };
 
 /// Result envelope for the non-streaming call.
@@ -42,6 +41,35 @@ struct LLMResponse {
     std::string content;     ///< Assistant message.  Empty when ok == false.
     std::string error;       ///< Human-readable error, e.g. "HTTP 401" or "timeout".
     int         attempts{0}; ///< Number of HTTPS requests we actually made.
+};
+
+// ---------------------------------------------------------------------------
+// Function-Calling / Agent support (OpenAI-compatible `tools` protocol)
+// ---------------------------------------------------------------------------
+
+/// A single tool the model may decide to call.
+struct ToolSpec {
+    std::string            name;         ///< e.g. "run_rule_engine"
+    std::string            description;  ///< What the tool does, for the model.
+    nlohmann::json         parameters;   ///< JSON-Schema object for arguments.
+};
+
+/// One tool invocation requested by the model.
+struct ToolCall {
+    std::string        id;       ///< Call id used to correlate the result.
+    std::string        name;     ///< Tool name.
+    nlohmann::json     arguments;///< Parsed arguments object.
+    std::string        raw_args; ///< Raw JSON string as sent by the model.
+};
+
+/// Outcome of a chat round that may carry tool calls instead of final text.
+struct ToolChatResult {
+    bool                  ok{false};
+    bool                  has_tool_calls{false};
+    std::string           content;   ///< Final assistant text (when no tool calls).
+    std::vector<ToolCall> calls;     ///< Tool invocations requested this round.
+    std::string           error;     ///< Human-readable error.
+    int                   attempts{0};
 };
 
 class LLMGateway {
@@ -66,8 +94,24 @@ public:
                             const std::string& user_prompt,
                             TokenCallback      on_token);
 
+    /**
+     * Agent round: send a full message history (array of {role, content}
+     * plus optional {role:"tool", tool_call_id, content} entries) together
+     * with a set of `tools`.  If the model responds with tool calls, those
+     * are returned in `calls`; the caller executes them, appends the results
+     * as tool messages, and calls again.  If the model returns plain text,
+     * `has_tool_calls` is false and `content` holds the final answer.
+     */
+    virtual ToolChatResult chat_with_tools(const std::string&             system_prompt,
+                                   const nlohmann::json&          messages,
+                                   const std::vector<ToolSpec>&   tools);
+
 private:
     LLMConfig cfg_;
+
+    /// Shared POST + retry/parse core.  `extract` turns the response JSON
+    /// into either a final content string or a list of tool calls.
+    ToolChatResult post_json_(const nlohmann::json& body);
 };
 
 }  // namespace aipr::gateway
