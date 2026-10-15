@@ -12,10 +12,12 @@ set -euo pipefail
 # ============================================================
 # 0) 凭证（从 SECRET.md 拷过来替换 <FILL>）
 # ============================================================
-export DEEPSEEK_API_KEY='<sk-29ae1609ae8d4f24b6560b4760efc29b>'
-export GITHUB_TOKEN='<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>'
-export QINIU_AK='<LTfj34dqwNlloOydMlSUEIPU_RNLwklznsnHx1tu>'
-export QINIU_SK='<6IQbNS-XvEfnPW-vcxnT3qx2dYDv5NoUj3EKrldd>'
+# SECURITY: never commit real credentials. Read from env / a local SECRET.md
+# that is gitignored, or export them in your shell before running this script.
+export DEEPSEEK_API_KEY='${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY first}'
+export GITHUB_TOKEN='${GITHUB_TOKEN:?set GITHUB_TOKEN first}'
+export QINIU_AK='${QINIU_AK:?set QINIU_AK first}'
+export QINIU_SK='${QINIU_SK:?set QINIU_SK first}'
 export QINIU_BUCKET='ai-pr-review-demo'
 export QINIU_REGION='z0'
 export QINIU_DOMAIN='tfvs8e8zx.hd-bkt.clouddn.com'

@@ -11,13 +11,15 @@
 ```bash
 # VM 小机器上
 cd ~/code/AI_PR_Review/code/build
-export DEEPSEEK_API_KEY="sk-29ae1609ae8d4f24b6560b4760efc29b"
-export GITHUB_TOKEN="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"
-export QINIU_AK="LTfj34dqwNlloOydMlSUEIPU_RNLwklznsnHx1tu"
-export QINIU_SK="6IQbNS-XvEfnPW-vcxnT3qx2dYDv5NoUj3EKrldd"
+# SECURITY: 真实凭据一律不要写进仓库（本文件曾泄露过密钥，已替换为占位符）。
+# 请在 shell 中导出，或写入 gitignore 掉的本地 SECRET.md 后 source。
+export DEEPSEEK_API_KEY="your-deepseek-api-key"
+export GITHUB_TOKEN="your-github-pat"
+export QINIU_AK="your-qiniu-access-key"
+export QINIU_SK="your-qiniu-secret-key"
 export QINIU_BUCKET="ai-pr-review-demo"
 export QINIU_REGION="z0"
-export QINIU_DOMAIN="tfvs8e8zx.hd-bkt.clouddn.com"
+export QINIU_DOMAIN="your-kodo-domain"
 
 # 验证二进制
 ./ai-pr-review --version
