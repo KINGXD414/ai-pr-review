@@ -118,7 +118,7 @@ void RuleEngine::check_format_only(const FileDiff& diff,
 
     auto is_whitespace_only = [](const std::string& s) -> bool {
         return std::all_of(s.begin(), s.end(), [](char c) {
-            return c == ' ' || c == '\t';
+            return c == ' ' || c == '\t' || c == '\r' || c == '\n';
         });
     };
 

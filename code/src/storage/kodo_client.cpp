@@ -222,7 +222,7 @@ UploadResult KodoClient::upload(const std::string& key,
 
 std::string KodoClient::public_url(const std::string& key) const {
     if (cfg_.domain.empty()) return {};
-    return "https://" + cfg_.domain + "/" + key;
+    return "http://" + cfg_.domain + "/" + key;
 }
 
 }  // namespace aipr::storage

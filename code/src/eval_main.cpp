@@ -7,7 +7,6 @@
  * produced review via aipr::eval::run_one_case and writes a final
  * Markdown report.
  */
-#include "common/utils.h"
 #include "eval/runner.h"
 
 #include <CLI/CLI.hpp>
@@ -21,16 +20,18 @@
 
 namespace {
 
+std::string env_or_empty(const char* name) {
+    const char* v = std::getenv(name);
+    return v ? std::string(v) : std::string();
+}
+
 std::string today_stamp() {
-    auto iso = aipr::common::now_iso();  // "YYYY-MM-DD HH:MM:SS"
-    // Transform to "YYYY-MM-DD_HHMM"
-    std::string stamp = iso;
-    if (stamp.size() >= 16) {
-        stamp[10] = '_';
-        stamp.erase(13, 1);  // remove second ':'
-        stamp.resize(16);
-    }
-    return stamp;
+    std::time_t now = std::time(nullptr);
+    std::tm tm_buf{};
+    localtime_r(&now, &tm_buf);
+    char ts[32];
+    std::strftime(ts, sizeof(ts), "%Y-%m-%d_%H%M", &tm_buf);
+    return ts;
 }
 
 }  // namespace
@@ -72,8 +73,8 @@ int main(int argc, char** argv) {
     spdlog::set_level(verbose ? spdlog::level::debug : spdlog::level::info);
     spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
 
-    if (github_token.empty()) github_token = aipr::common::env_or_empty("GITHUB_TOKEN");
-    if (llm_key.empty()) llm_key = aipr::common::env_or_empty("DEEPSEEK_API_KEY");
+    if (github_token.empty()) github_token = env_or_empty("GITHUB_TOKEN");
+    if (llm_key.empty()) llm_key = env_or_empty("DEEPSEEK_API_KEY");
     if (llm_key.empty() && !dry_run) {
         spdlog::error(
             "LLM key missing: pass --llm-key or set DEEPSEEK_API_KEY "
