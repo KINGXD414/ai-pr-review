@@ -812,6 +812,7 @@ export GITHUB_TOKEN="ghp_xxxxxxxx"
 
 ### 阶段六：沉淀
 
+- `docs/architecture_qa.md`：架构问答与工程取舍（设计决策、实现细节、已知限制、演进路径）
 - `demo/`：v0.2.0 两份 + v0.3.0 两份真实产出，形成版本对比
 - 提交历史按语义拆分为 8 个 commit（rag / skills / agent / mcp / pipeline / build / docs / chore）
 
