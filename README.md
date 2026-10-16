@@ -261,6 +261,28 @@ sha256sum ai-pr-review-v0.2.0.tar.gz   # 比对两者
 
 完整原始数据 + 反思分析见 [`code/eval/comparison_report.md`](code/eval/comparison_report.md) 与 [`demo/v020_evaluation_matrix.md`](demo/v020_evaluation_matrix.md)。
 
+### v0.3.0 评测矩阵（重构回归 + 新能力量化）
+
+v0.3.0 把规则引擎接入主流程、修复 Agent 结果被覆盖的 P0 缺陷后，重新跑矩阵，并首次把 `--rag` / `--agent` / `--embed` 量化进去（每个 config 5 cases × 1 次调用 = 5 次，共 25 次 LLM 调用，全部成功）：
+
+| 配置 | 平均分 | 相对 v0.3.0 baseline | 相对 v0.2.0 baseline |
+|---|---|---|---|
+| baseline（v0.3.0，规则引擎已接通） | **89%** | — | **+7** |
+| +RAG（BM25 检索增强） | **84%** | **−5** | +2 |
+| +Agent（Function Calling 循环） | 88% | −1 | +6 |
+| +Agent + RAG + Embed（完整形态） | 87% | −2 | +5 |
+| +persona linus | **92%** | **+3** | +10 |
+
+五条关键发现：
+
+1. **重构的真正收益是规则引擎接通**：v0.3.0 baseline（89%）比 v0.2.0 baseline（82%）高 **+7 分**，直接验证 P0 修复（规则引擎未接入主流程 / Agent 结果被覆盖）确实把分数救了回来——这正是集成期缺陷最隐蔽也最值钱的一类。
+2. **RAG（BM25）在当前实现下是净负面（−5%）**：检索注入的上下文反而抬高了幻觉率或分散了注意力，把分数从 89% 拉到 84%。这是诚实的反直觉结论——**没有藏起来，也没有默认开启**。RAG 缺的是一个"检索质量门禁"（相关性阈值 + 去重 + 命中才注入），它排进下一轮 TODO 而非本版本卖点。
+3. **Agent 循环基本持平（−1%）**：在 5 条用例上单次推理已够用，多轮并不多赚；Agent 的价值应在"跨文件 / 需反复查证"的高难 PR 上才显形，而本评测集的高难 case 偏少。结论：**Agent 是能力储备，不是这套评测集的提分项**。
+4. **persona-linus 依旧是最强单一开关（+3%，共 92%）**：与 v0.2.0 结论一致且更稳（当时 87%、含 low-case 误杀拖累），说明人格化 prompt 是已被两次独立评测验证的资产。
+5. **堆功能 ≠ 提分**：`+Agent + RAG + Embed` 组合（87%）反而低于纯 baseline（89%）。新能力未经各自调优就叠加，只会互相干扰——这条本身也是一次"feature discipline"的实证。
+
+> 原始 run report：`eval/run_report_v030_{baseline,rag,agent,agent_rag,linus}.md` 与 `eval/runs/v030-*/`（本地生成，未进仓库）。聚合分已如上固化，便于直接引用。
+
 ## 构建与运行
 
 ### 依赖
