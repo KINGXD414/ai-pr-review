@@ -243,3 +243,25 @@ cd ../.. && python3 mcp/server.py    # stdio 模式，由客户端驱动
 - "团队里 Agent 的结果怎么评测？是人工抽样还是有一套自动化指标？"
 - "MCP 现在是接外部工具为主，还是内部平台也在暴露 MCP 服务？"
 - "客户端侧 Agent 的延迟你们怎么控制的？有没有做本地小模型和云端大模型的分流？"
+
+---
+
+## 附录 A：PR 流转全流程（面试必背，对应 main.cpp / agent.cpp / pr_review.yml）
+
+> 被问"一个 PR 提交之后在你系统里怎么流转"时的标准回答模板。配合上面的流程图食用。
+
+**一句话总览**：一个 PR 进来，系统走【触发 → 抓取 → 上下文构建 → 大模型推理 → 交付】五条主线，最终以一条幂等的 comment 贴回 PR。核心不是"调一次大模型"，而是把这条链路做成**可观测、可重试、可幂等的流水线**。
+
+**标准回答（口述版，约 90 秒）**：
+1. **触发**：两条入口——CI 自动（PR 打开/更新触发 GitHub Action `pr_review.yml`）和人工（工程师在 Cursor 里点 `review_pr` MCP 工具）。两条路最后都落到同一个二进制 `ai-pr-review`。
+2. **抓取**：解析 PR URL、校验 token，调 GitHub API 拉 metadata + 改动文件 + patch diff。这里带了 **3 次重试 + 退避**，避免限流 5xx 直接挂（`api_client.cpp` 的 `kMaxRetries`）。
+3. **上下文构建（关键）**：并行做三件事——规则引擎（**始终跑**，8 条硬规则命中结果注入 prompt）、AST 分析（可选 `--source-dir`，libclang）、RAG 检索（可选 `--rag`/`--embed`，BM25 或向量）。
+4. **推理**：把 persona + diff + 规则命中组装进 prompt 交给 DeepSeek。有个 `--agent` 开关：开 → Function Calling 多轮循环（模型自己决定调哪些工具，如读文件、跑规则、查历史）；关 → 单次 LLM，或 Consensus 多投 / Self-Critique 二审。
+5. **交付**：渲染成 Markdown，落盘，可选传 KODO；CI 模式下用 sticky comment（带固定 HTML 锚点）**幂等回贴**——同一个 PR 永远只占一条评论，不刷屏。
+
+**三个区分度亮点（被追问时抛出来）**：
+- **规则引擎必须"接入主流程"**：我们踩过坑——规则算出来了但没注入 prompt，等于白做。这是 P0 修复，也是 v0.3.0 评测从 82%→89% 的根因。
+- **Agent 模式会跳过 Consensus / Self-Critique 后处理**：因为 agent 循环本身就在多轮自我迭代，再跑固定后处理会用普通 chat 结果覆盖掉 agent 产出，还多花两份钱（`main.cpp` 有注释）。
+- **sticky comment 幂等回贴**是高并发 / PR 反复更新时的必要工程设计。
+
+**收尾金句**："所以这套系统我理解的核心，是把'抓取-上下文-推理-交付'做成一条可观测、可重试、可幂等的流水线，Agent 只是推理阶段的一种增强模式，不是全部。"
