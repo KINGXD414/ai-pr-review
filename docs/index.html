@@ -72,7 +72,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
       <h3>🔍 Review 配置</h3>
       <div class="input-group"><label>GitHub PR URL</label><input type="text" id="pr-url" placeholder="https://github.com/owner/repo/pull/123" spellcheck="false"></div>
       <div class="input-group"><label>审查模式</label>
-        <select id="mode-select"><option value="baseline">Baseline（默认）</option><option value="linus">Persona · Linus（严厉审查）</option><option value="critique">Self-Critique（自我质疑）</option><option value="consensus">Consensus 3（多数裁决）</option></select>
+        <select id="mode-select"><option value="baseline">Baseline（默认）</option><option value="linus">Persona · Linus（严厉审查）</option><option value="critique">Self-Critique（自我质疑）</option><option value="consensus">Consensus 3（多数裁决）</option><option value="agent">Agent（Function Calling 循环）</option><option value="rag">RAG（BM25 检索增强）</option><option value="full">Full（Agent+RAG+Embed）</option></select>
       </div>
       <button class="btn-run" id="btn-run" onclick="runReview()">▶ 开始 Review</button>
       <div class="backend-status checking" id="backend-status">⏳ 检测后端 ...</div>
@@ -80,8 +80,8 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
     <div class="card">
       <h3>⚡ 快速演示（即时返回）</h3>
       <ul class="quick-list">
-        <li><div class="quick-item"><span class="pr-name" onclick="quickFill('muduo-729')">muduo PR #729</span><span class="pr-modes">4 种</span></div>
-          <div class="mode-pills"><span class="mode-pill" onclick="quickRun(event,'muduo-729','baseline')">Baseline</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','linus')">Linus</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','critique')">Critique</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','consensus')">Consensus</span></div></li>
+        <li><div class="quick-item"><span class="pr-name" onclick="quickFill('muduo-729')">muduo PR #729</span><span class="pr-modes">7 种</span></div>
+          <div class="mode-pills"><span class="mode-pill" onclick="quickRun(event,'muduo-729','baseline')">Baseline</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','linus')">Linus</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','critique')">Critique</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','consensus')">Consensus</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','agent')">Agent</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','rag')">RAG</span><span class="mode-pill" onclick="quickRun(event,'muduo-729','full')">Full</span></div></li>
         <li><div class="quick-item"><span class="pr-name" onclick="quickFill('muduo-505')">muduo PR #505</span><span class="pr-modes">2 种</span></div>
           <div class="mode-pills"><span class="mode-pill" onclick="quickRun(event,'muduo-505','baseline')">Baseline</span><span class="mode-pill" onclick="quickRun(event,'muduo-505','linus')">Linus</span></div></li>
         <li><div class="quick-item"><span class="pr-name" onclick="quickFill('json-5187')">nlohmann/json PR #5187</span><span class="pr-modes">1 种</span></div>
@@ -118,7 +118,7 @@ const PR_MAP={
   'json-5187':{repo:'nlohmann/json',pr:5187,label:'nlohmann/json PR #5187'},
   'self-pr26':{repo:'KINGXD414/ai-pr-review',pr:26,label:'ai-pr-review PR #26'}
 };
-const MODE_LABELS={baseline:'Baseline',linus:'Persona · Linus',critique:'Self-Critique',consensus:'Consensus 3'};
+const MODE_LABELS={baseline:'Baseline',linus:'Persona · Linus',critique:'Self-Critique',consensus:'Consensus 3',agent:'Agent（Function Calling）',rag:'RAG（BM25）',full:'Full（Agent+RAG+Embed）'};
 let backendOnline=false;
 fetch('reports_data.json').then(r=>r.json()).then(d=>Object.assign(REPORTS,d));
 async function checkBackend(){

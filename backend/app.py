@@ -46,6 +46,9 @@ MODE_FLAGS = {
     "linus":     ["--persona", "linus"],
     "critique":  ["--self-critique"],
     "consensus": ["--consensus", "3"],
+    "agent":     ["--agent"],
+    "rag":       ["--rag"],
+    "full":      ["--agent", "--rag", "--embed"],
 }
 
 # ── State ──
